@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: ai-client-hunter-backend
+    runtime: node
+    plan: free
+
+    buildCommand: npm ci
+    startCommand: npm run server
+
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: PORT
+        value: 5000
+
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash
+
+      - key: RATE_LIMIT_MAX
+        value: 100
+
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+
+      - key: GEMINI_API_KEY
+        sync: false
+
+      - key: TAVILY_API_KEY
+        sync: false
+
+      - key: SUPABASE_URL
+        sync: false
+
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      - key: FRONTEND_URL
+        sync: false
