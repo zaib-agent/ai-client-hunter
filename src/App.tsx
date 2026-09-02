@@ -3,6 +3,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type FormEvent,
 } from 'react'
 
 import {
@@ -12,17 +13,14 @@ import {
 } from '@supabase/supabase-js'
 
 import './App.css'
-import API_URL from './config'
+import API_URL, { SUPABASE_URL, SUPABASE_ANON_KEY } from './config'
 
 // ============================================================
 // SUPABASE CONFIG
 // ============================================================
 
-const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL?.trim() || ''
-
-const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || ''
+// Values come from src/config.ts so local and production builds
+// use one consistent configuration source.
 
 // IMPORTANT:
 // This is the URL where Supabase sends the user AFTER
@@ -74,6 +72,8 @@ type Prospect = {
   industry: string
   location: string
   website: string
+  contactEmail?: string
+  sourceUrls?: string[]
   likelyNeed: string
   reason: string
   suggestedService: string
@@ -220,7 +220,7 @@ function AuthScreen() {
     useState('')
 
   const submit = async (
-    event: React.FormEvent
+    event: FormEvent
   ) => {
     event.preventDefault()
 
@@ -655,6 +655,10 @@ function App() {
     setProspects,
   ] = useState<Prospect[]>([])
 
+  const [researchSources, setResearchSources] = useState<
+    { title: string; url: string }[]
+  >([])
+
   const [
     hunterLoading,
     setHunterLoading,
@@ -736,6 +740,26 @@ function App() {
     outreachLoading,
     setOutreachLoading,
   ] = useState(false)
+
+  // =========================================================
+  // AUTOPILOT STATE
+  // =========================================================
+  const [autopilotActive, setAutopilotActive] = useState(false)
+  const [autopilotLoading, setAutopilotLoading] = useState(false)
+  const [autopilotMessage, setAutopilotMessage] = useState('')
+  const [autopilotLastRun, setAutopilotLastRun] = useState<string | null>(null)
+  const [autopilotStats, setAutopilotStats] = useState<{
+    found?: number
+    strong?: number
+    saved?: number
+    emailed?: number
+  } | null>(null)
+  const [emailReady, setEmailReady] = useState(false)
+  const [replyMonitorReady, setReplyMonitorReady] = useState(false)
+
+  // Sender profile used by AI-generated outreach. Saved locally in this browser.
+  const [senderName, setSenderName] = useState(() => localStorage.getItem('ach_sender_name') || '')
+  const [senderCompany, setSenderCompany] = useState(() => localStorage.getItem('ach_sender_company') || '')
 
   // =========================================================
   // AUTH INITIALIZATION
@@ -1024,6 +1048,7 @@ function App() {
       setHunterLoading(true)
       setHunterError('')
       setProspects([])
+      setResearchSources([])
 
       try {
         const response =
@@ -1062,9 +1087,8 @@ function App() {
           )
         }
 
-        setProspects(
-          data.prospects || []
-        )
+        setProspects(data.prospects || [])
+        setResearchSources(data.sources || [])
       } catch (error) {
         setHunterError(
           error instanceof Error
@@ -1331,6 +1355,8 @@ function App() {
                 JSON.stringify({
                   lead,
                   channel,
+                  senderName: senderName.trim(),
+                  senderCompany: senderCompany.trim(),
                 }),
             },
             session.access_token
@@ -1364,6 +1390,123 @@ function App() {
         )
       }
     }
+
+  // =========================================================
+  // AUTOPILOT
+  // =========================================================
+  const refreshAutopilotStatus = useCallback(async () => {
+    try {
+      // Public service-status check keeps SMTP/IMAP indicators accurate even
+      // when the authenticated job endpoint is temporarily unavailable.
+      const publicResponse = await fetch(`${API_URL}/api/config-status`, { cache: 'no-store' })
+      const publicData = await publicResponse.json()
+      if (publicResponse.ok && publicData.success) {
+        setEmailReady(Boolean(publicData.services?.smtp))
+        setReplyMonitorReady(Boolean(publicData.services?.imap))
+      }
+
+      if (!session?.access_token) return
+      const response = await apiFetch('/api/autopilot/status', {}, session.access_token)
+      const data = await response.json()
+      if (!response.ok || !data.success) return
+      setAutopilotActive(Boolean(data.active))
+      setAutopilotLastRun(data.lastRunAt || null)
+      setAutopilotStats(data.lastResult || null)
+      setEmailReady(Boolean(data.emailReady))
+      setReplyMonitorReady(Boolean(data.replyMonitorReady))
+    } catch (error) {
+      console.error('Autopilot status:', error)
+    }
+  }, [session?.access_token])
+
+  useEffect(() => {
+    if (!session?.access_token) return
+    refreshAutopilotStatus()
+    const timer = window.setInterval(refreshAutopilotStatus, 30000)
+    return () => window.clearInterval(timer)
+  }, [session?.access_token, refreshAutopilotStatus])
+
+  const startAutopilot = async () => {
+    if (!session?.access_token) {
+      setAutopilotMessage('Your session has expired. Please sign in again.')
+      return
+    }
+    if (!niche.trim()) {
+      setAutopilotMessage('Enter your target niche first.')
+      return
+    }
+    setAutopilotLoading(true)
+    setAutopilotMessage('')
+    try {
+      const response = await apiFetch('/api/autopilot/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          niche: niche.trim(),
+          location: location.trim(),
+          service: service.trim(),
+          additionalInfo: additionalInfo.trim(),
+          senderName: senderName.trim(),
+          senderCompany: senderCompany.trim(),
+        }),
+      }, session.access_token)
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error(data.error || 'Unable to start autopilot.')
+      setAutopilotActive(true)
+      setAutopilotLastRun(new Date().toISOString())
+      setAutopilotStats(data.firstRun || null)
+      setAutopilotMessage(`Autopilot is ON. First run found ${data.firstRun?.found || 0} leads and emailed ${data.firstRun?.emailed || 0}.`)
+      await loadLeads()
+    } catch (error) {
+      setAutopilotMessage(error instanceof Error ? error.message : 'Unable to start autopilot.')
+    } finally {
+      setAutopilotLoading(false)
+    }
+  }
+
+  const stopAutopilot = async () => {
+    if (!session?.access_token) return
+    setAutopilotLoading(true)
+    try {
+      const response = await apiFetch('/api/autopilot/stop', { method: 'POST' }, session.access_token)
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error(data.error || 'Unable to stop autopilot.')
+      setAutopilotActive(false)
+      setAutopilotMessage('Autopilot stopped.')
+    } catch (error) {
+      setAutopilotMessage(error instanceof Error ? error.message : 'Unable to stop autopilot.')
+    } finally {
+      setAutopilotLoading(false)
+    }
+  }
+
+  const runAutopilotNow = async () => {
+    if (!session?.access_token) return
+    setAutopilotLoading(true)
+    setAutopilotMessage('')
+    try {
+      const response = await apiFetch('/api/autopilot/run-now', {
+        method: 'POST',
+        body: JSON.stringify({
+          niche: niche.trim(),
+          location: location.trim(),
+          service: service.trim(),
+          additionalInfo: additionalInfo.trim(),
+          senderName: senderName.trim(),
+          senderCompany: senderCompany.trim(),
+        }),
+      }, session.access_token)
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error(data.error || 'Autonomous hunt failed.')
+      setAutopilotLastRun(new Date().toISOString())
+      setAutopilotStats(data)
+      setAutopilotMessage(`Run complete: ${data.found || 0} found, ${data.emailed || 0} emails sent.`)
+      await loadLeads()
+    } catch (error) {
+      setAutopilotMessage(error instanceof Error ? error.message : 'Autonomous hunt failed.')
+    } finally {
+      setAutopilotLoading(false)
+    }
+  }
 
   // =========================================================
   // AI SALES CHAT
@@ -1893,6 +2036,64 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               )}
             </section>
 
+            <section className="panel autopilot-panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Autonomous Client Hunter</h2>
+                  <p>AI repeatedly finds strong prospects, saves them, generates outreach and sends verified-email outreach automatically.</p>
+                </div>
+                <span className={autopilotActive ? 'autopilot-badge active' : 'autopilot-badge'}>
+                  {autopilotActive ? '● AUTOPILOT ON' : '○ OFF'}
+                </span>
+              </div>
+
+              <div className="autopilot-grid">
+                <div className="autopilot-info">
+                  <strong>Automatic workflow</strong>
+                  <span>Web research → qualification → verified public email → AI email → send → CRM</span>
+                </div>
+                <div className="autopilot-info">
+                  <strong>Reply handoff</strong>
+                  <span>{replyMonitorReady ? 'AI reply monitor is ready and will notify you about interested replies.' : 'Reply monitor needs IMAP email settings in backend .env.'}</span>
+                </div>
+              </div>
+
+              <div className="autopilot-actions">
+                {!autopilotActive ? (
+                  <button className="primary-button" onClick={startAutopilot} disabled={autopilotLoading || !emailReady}>
+                    {autopilotLoading ? 'Starting...' : '▶ Start Autonomous Hunter'}
+                  </button>
+                ) : (
+                  <button className="text-button" onClick={stopAutopilot} disabled={autopilotLoading}>
+                    ■ Stop Autopilot
+                  </button>
+                )}
+                <button className="text-button" onClick={runAutopilotNow} disabled={autopilotLoading}>
+                  {autopilotLoading ? 'Running...' : '↻ Run Now'}
+                </button>
+                {!emailReady && (
+                  <span className="autopilot-warning">SMTP is not configured, so automatic email sending is disabled.</span>
+                )}
+              </div>
+
+              {autopilotMessage && <p className="autopilot-message">{autopilotMessage}</p>}
+
+              {autopilotStats && (
+                <div className="autopilot-stats">
+                  <span>Found <strong>{autopilotStats.found || 0}</strong></span>
+                  <span>Strong <strong>{autopilotStats.strong || 0}</strong></span>
+                  <span>Saved <strong>{autopilotStats.saved || 0}</strong></span>
+                  <span>Emailed <strong>{autopilotStats.emailed || 0}</strong></span>
+                </div>
+              )}
+
+              {autopilotLastRun && (
+                <small className="autopilot-last-run">
+                  Last run: {new Date(autopilotLastRun).toLocaleString()}
+                </small>
+              )}
+            </section>
+
             <div
               style={{
                 display: 'grid',
@@ -1927,6 +2128,12 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                             prospect.location
                           }
                         </p>
+
+                        {prospect.contactEmail && (
+                          <small className="contact-email">
+                            ✉ {prospect.contactEmail}
+                          </small>
+                        )}
                       </div>
 
                       <strong>
@@ -2033,6 +2240,30 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                 )
               )}
             </div>
+
+            {researchSources.length > 0 && (
+              <section className="evidence-panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Research Evidence</h2>
+                    <p>Live web sources returned by the research run. Verify the source before outreach.</p>
+                  </div>
+                  <span className="evidence-count">{researchSources.length} sources</span>
+                </div>
+                <div className="evidence-list">
+                  {researchSources.map((source, index) => (
+                    <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer" className="evidence-item">
+                      <span>{index + 1}</span>
+                      <div>
+                        <strong>{source.title || 'Web source'}</strong>
+                        <small>{source.url}</small>
+                      </div>
+                      <b>↗</b>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )}
 
@@ -2342,18 +2573,32 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
             PRODUCTS
         ==================================================== */}
 
-        {activePage ===
-          'Products & Demos' && (
-          <section className="page-placeholder">
-            <h2>
-              Products & Demos
-            </h2>
-
-            <p>
-              Product demo management
-              will be added in the
-              production polish phase.
-            </p>
+        {activePage === 'Products & Demos' && (
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>Products & Demos</h2>
+                <p>Define the offer you want AI Client Hunter to use in qualification and outreach.</p>
+              </div>
+            </div>
+            <div className="settings-grid" style={{ marginTop: '20px' }}>
+              <div>
+                <label>Primary service</label>
+                <input value={service} onChange={(e) => setService(e.target.value)} placeholder="e.g. Website development" />
+              </div>
+              <div>
+                <label>Ideal client</label>
+                <input value={niche} onChange={(e) => setNiche(e.target.value)} placeholder="e.g. Dental clinics" />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label>Offer / demo notes</label>
+                <textarea value={additionalInfo} onChange={(e) => setAdditionalInfo(e.target.value)} rows={5} placeholder="Describe your offer, proof, package, CTA or qualification rules." />
+              </div>
+            </div>
+            <div className="info-card" style={{ marginTop: '18px' }}>
+              <strong>How this is used</strong>
+              <p>Your service and ideal-client details are sent to the AI qualification and outreach engines. No fake product data is inserted automatically.</p>
+            </div>
           </section>
         )}
 
@@ -2392,17 +2637,41 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               </p>
 
               <h4>
-                Account ID
+                Outreach sender profile
               </h4>
-
-              <p
-                style={{
-                  wordBreak:
-                    'break-all',
-                }}
-              >
-                {user.id}
+              <p style={{ opacity: 0.72 }}>
+                This name/company is used by AI when writing first-contact emails. It is stored only in this browser.
               </p>
+              <div className="settings-grid" style={{ marginTop: '12px' }}>
+                <div>
+                  <label>
+                    Your Name
+                  </label>
+                  <input
+                    value={senderName}
+                    onChange={(event) => {
+                      setSenderName(event.target.value)
+                      localStorage.setItem('ach_sender_name', event.target.value)
+                    }}
+                    placeholder="e.g. Jahanzaib"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label>
+                    Your Company
+                  </label>
+                  <input
+                    value={senderCompany}
+                    onChange={(event) => {
+                      setSenderCompany(event.target.value)
+                      localStorage.setItem('ach_sender_company', event.target.value)
+                    }}
+                    placeholder="e.g. Jahanzaib Digital"
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
 
               <h4>
                 Confirmation redirect
@@ -2417,16 +2686,43 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                 {AUTH_REDIRECT_URL}
               </p>
 
-              <button
-                className="text-button"
-                onClick={
-                  handleLogout
-                }
-                style={{
-                  marginTop:
-                    '15px',
-                }}
-              >
+              <div className="settings-status-grid">
+                <div><span>Supabase</span><strong>{supabase ? 'Connected' : 'Not configured'}</strong></div>
+                <div><span>API</span><strong>{API_URL}</strong></div>
+                <div><span>Authentication redirect</span><strong>{AUTH_REDIRECT_URL}</strong></div>
+              </div>
+
+              <div className="settings-grid" style={{ marginTop: '18px' }}>
+                <div className="info-card">
+                  <strong>Automatic email outreach</strong>
+                  <p>{emailReady ? 'SMTP connected — AI can send outreach emails.' : 'SMTP not configured.'}</p>
+                </div>
+                <div className="info-card">
+                  <strong>Interested-reply monitor</strong>
+                  <p>{replyMonitorReady ? 'IMAP connected — interested replies will be forwarded to your notification email.' : 'IMAP not configured.'}</p>
+                </div>
+              </div>
+
+              {emailReady && (
+                <button
+                  className="text-button"
+                  onClick={async () => {
+                    if (!session?.access_token) return
+                    try {
+                      const response = await apiFetch('/api/email/test', { method: 'POST' }, session.access_token)
+                      const data = await response.json()
+                      alert(response.ok && data.success ? `Test email sent to ${data.sentTo}.` : (data.error || 'Email test failed.'))
+                    } catch {
+                      alert('Email test failed.')
+                    }
+                  }}
+                  style={{ marginTop: '18px' }}
+                >
+                  ✉ Send Test Email
+                </button>
+              )}
+
+              <button className="text-button" onClick={handleLogout} style={{ marginTop: '18px' }}>
                 Sign Out
               </button>
             </div>
@@ -2611,6 +2907,13 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                 No website
                 available.
               </p>
+            )}
+
+            {selectedLead.contactEmail && (
+              <>
+                <h4>Verified Contact Email</h4>
+                <p>{selectedLead.contactEmail}</p>
+              </>
             )}
 
             <h4>
