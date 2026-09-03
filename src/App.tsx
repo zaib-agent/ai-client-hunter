@@ -76,6 +76,8 @@ type Prospect = {
   location: string
   website: string
   contactEmail?: string
+  contactName?: string
+  contactRole?: string
   sourceUrls?: string[]
   likelyNeed: string
   reason: string
@@ -2332,7 +2334,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               <div className="panel-header">
                 <div>
                   <h2>Autonomous Client Hunter</h2>
-                  <p>AI repeatedly finds strong prospects, saves them, generates outreach and sends verified-email outreach automatically.</p>
+                  <p>AI repeatedly finds strong prospects, saves them, generates outreach and sends public-email outreach automatically.</p>
                 </div>
                 <span className={autopilotActive ? 'autopilot-badge active' : 'autopilot-badge'}>
                   {autopilotActive ? '● AUTOPILOT ON' : '○ OFF'}
@@ -2342,7 +2344,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               <div className="autopilot-grid">
                 <div className="autopilot-info">
                   <strong>Automatic workflow</strong>
-                  <span>Web research → qualification → verified public email → AI email → send → CRM</span>
+                  <span>Web research → qualification → public email → recipient-aware AI email → send → CRM</span>
                 </div>
                 <div className="autopilot-info">
                   <strong>Reply handoff</strong>
@@ -2420,6 +2422,12 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                             prospect.location
                           }
                         </p>
+
+                        {prospect.contactName && (
+                          <small className="contact-email">
+                            👤 {prospect.contactName}{prospect.contactRole ? ` · ${prospect.contactRole}` : ''}
+                          </small>
+                        )}
 
                         {prospect.contactEmail && (
                           <small className="contact-email">
@@ -2963,6 +2971,11 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     style={{ width: '100%', boxSizing: 'border-box' }}
                   />
                 </div>
+              </div>
+
+              <div className="info-card" style={{ marginTop: '14px' }}>
+                <strong>How outbound email identity works</strong>
+                <p>Emails are sent from the SMTP account configured on the backend. Your company name is used as the visible sender name, while the prospect's business/person name is used for the greeting. The agent never pretends to be the prospect.</p>
               </div>
 
               <h4>

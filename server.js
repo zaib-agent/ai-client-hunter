@@ -62,6 +62,7 @@ const SMTP_SECURE = String(process.env.SMTP_SECURE ?? "true").toLowerCase() === 
 const SMTP_USER = (process.env.SMTP_USER || "").trim();
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const SMTP_FROM = (process.env.SMTP_FROM || SMTP_USER).trim();
+const SMTP_FROM_NAME = (process.env.SMTP_FROM_NAME || "AI Client Hunter").trim();
 const NOTIFY_EMAIL = (process.env.NOTIFY_EMAIL || SMTP_USER).trim();
 
 const IMAP_HOST = (process.env.IMAP_HOST || "").trim();
@@ -457,6 +458,8 @@ function fallbackQualifyClients({ niche, location, service, sources }) {
         location: location || "Unknown",
         website: url,
         contactEmail: email,
+        contactName: "",
+        contactRole: "",
         likelyNeed: "",
         reason: reasonParts.join(" "),
         suggestedService: service || "",
@@ -493,8 +496,9 @@ Additional requirements: ${additionalInfo || "None"}
 
 Use ONLY the supplied live web evidence. Never invent a business, URL, owner, phone, email, metric, problem, or fact.
 "likelyNeed" is a hypothesis unless directly supported.
-A contactEmail may be returned ONLY if that exact email appears in the supplied evidence.
+A contactEmail may be returned ONLY if that exact email appears in the supplied evidence. Do not call it verified; call it a public email found in the evidence.
 Prefer official business websites and strong-fit businesses.
+If a person name or role is explicitly present in the evidence, return it; otherwise leave contactName/contactRole empty.
 Return fewer strong leads rather than weak guesses.
 
 Return ONLY valid JSON:
@@ -506,6 +510,8 @@ Return ONLY valid JSON:
       "location": "string",
       "website": "string",
       "contactEmail": "string or empty",
+      "contactName": "string or empty; only if explicitly supported by evidence",
+      "contactRole": "string or empty; only if explicitly supported by evidence",
       "likelyNeed": "string",
       "reason": "string",
       "suggestedService": "string",
@@ -543,6 +549,8 @@ ${evidence}
         location: cleanString(item?.location) || location || "Unknown",
         website: normalizeUrl(item?.website),
         contactEmail: allEmails.has(email) ? email : "",
+        contactName: normalizePersonName(item?.contactName),
+        contactRole: cleanString(item?.contactRole),
         likelyNeed: cleanString(item?.likelyNeed),
         reason: cleanString(item?.reason),
         suggestedService: cleanString(item?.suggestedService) || service,
@@ -575,37 +583,73 @@ const transporter = emailTransportConfigured()
     })
   : null;
 
-async function sendEmail({ to, subject, text, replyTo }) {
+function normalizePersonName(value) {
+  const text = cleanString(value).replace(/[\r\n]+/g, " ").trim();
+  if (!text || /^(unknown|not known|n\/a|none|null)$/i.test(text)) return "";
+  if (text.length > 80) return "";
+  return text;
+}
+
+function safeHeaderName(value, fallback) {
+  const text = cleanString(value).replace(/[\r\n]+/g, " ").trim();
+  return text.slice(0, 120) || fallback;
+}
+
+function formatSenderAddress(sender = {}) {
+  const address = SMTP_FROM || SMTP_USER;
+  const name = safeHeaderName(
+    sender.company || sender.name || SMTP_FROM_NAME,
+    "AI Client Hunter"
+  );
+  return { name, address };
+}
+
+async function sendEmail({ to, subject, text, replyTo, senderName, senderCompany, notification = false }) {
   if (!transporter) throw new Error("SMTP email is not configured.");
+
+  const from = notification
+    ? { name: safeHeaderName(SMTP_FROM_NAME, "AI Client Hunter"), address: SMTP_FROM || SMTP_USER }
+    : formatSenderAddress({ name: senderName, company: senderCompany });
+
   return transporter.sendMail({
-    from: SMTP_FROM || SMTP_USER,
+    from,
     to,
     subject,
     text,
-    replyTo: replyTo || undefined,
+    replyTo: replyTo || SMTP_FROM || SMTP_USER,
   });
 }
 
 function fallbackOutreachText(lead, sender = {}) {
-  const senderName = cleanString(sender.name) || "there";
+  const businessName = cleanString(lead.businessName) || "your team";
+  const recipientName = normalizePersonName(lead.contactName);
+  const senderName = cleanString(sender.name);
   const senderCompany = cleanString(sender.company);
+  const service = cleanString(lead.suggestedService) || "our service";
 
-  const greeting = `Hi${senderName === "there" ? "" : " " + senderName},`;
+  const greeting = recipientName
+    ? `Hi ${recipientName},`
+    : `Hi ${businessName} team,`;
 
-  const subject = `Quick idea for ${lead.businessName || "your business"}`;
-  const service = lead.suggestedService || "our service";
+  const senderLine = senderCompany
+    ? `I work with ${senderCompany} on ${service}.`
+    : senderName
+      ? `I’m ${senderName}, and I work on ${service}.`
+      : `I work on ${service}.`;
+
+  const subject = `Quick idea for ${businessName}`;
 
   const body = [
     greeting,
     "",
-    `I came across ${lead.businessName || "your business"} while researching ${lead.industry || "businesses"} in ${lead.location || "your area"}.`,
+    `I came across ${businessName} while researching ${lead.industry || "businesses"} in ${lead.location || "your area"}.`,
     "",
-    `I work${senderCompany ? ` with ${senderCompany}` : ""} on ${service}. I had a quick idea that may be relevant to your team, and I wanted to see whether it is worth a short conversation.`,
+    `${senderLine} I had a quick idea that may be relevant to your team based on the public information available about the business.`,
     "",
-    "If this is something you're currently exploring, I can send a few details or a simple example.",
+    "If this is something you’re exploring, I can send a short example and a few details.",
     "",
     "Best,",
-    sender.name || "AI Client Hunter",
+    senderName || "AI Client Hunter",
     ...(senderCompany ? [senderCompany] : []),
   ].join("\n");
 
@@ -615,30 +659,43 @@ function fallbackOutreachText(lead, sender = {}) {
 async function generateOutreachText(lead, sender = {}) {
   const senderName = cleanString(sender.name);
   const senderCompany = cleanString(sender.company);
+  const recipientName = normalizePersonName(lead.contactName);
 
   const prompt = `
-Write a concise, natural first B2B sales email for this prospect.
+Write a concise, natural first B2B sales email to the PROSPECT below.
 
+PROSPECT / RECIPIENT
 Business: ${lead.businessName}
+Recipient person name: ${recipientName || "No reliable person name found"}
+Recipient role: ${cleanString(lead.contactRole) || "Unknown"}
 Industry: ${lead.industry || "Unknown"}
 Location: ${lead.location || "Unknown"}
 Website: ${lead.website || "Unknown"}
+Public contact email: ${lead.contactEmail || "Unknown"}
 Likely need: ${lead.likelyNeed || "Unknown"}
-Reason: ${lead.reason || "Unknown"}
-Service offered: ${lead.suggestedService || "Professional service"}
+Evidence / reason: ${lead.reason || "Unknown"}
 Outreach angle: ${lead.outreachAngle || "Unknown"}
 
+SENDER / OUR BUSINESS
 Sender name: ${senderName || "Not provided"}
 Sender company: ${senderCompany || "Not provided"}
+Service offered: ${lead.suggestedService || "Professional service"}
 
 Rules:
+- You are writing TO the prospect, never to the sender.
+- The greeting MUST use the prospect person's name only if a reliable recipient person name is supplied.
+- If no reliable person name is supplied, greet the business naturally as: "Hi ${cleanString(lead.businessName) || "Business"} team,".
+- NEVER greet the sender by mistake. Never use the sender name as the recipient name.
+- The sender identity belongs in the signature and/or a brief sender-introduction sentence.
+- Keep the prospect's business name correct and natural.
 - Use ONLY facts supplied above.
-- Do not invent names, results, metrics, customers, problems, emails or other facts.
-- Treat likely need as a hypothesis.
-- No fake personalization.
-- 100-160 words maximum.
-- One clear low-friction CTA.
-- Do not say "I noticed" unless the supplied evidence actually supports it.
+- Do not invent owners, employees, results, metrics, customers, problems, emails, phone numbers or observations.
+- Treat likely need as a hypothesis unless directly supported by the evidence.
+- Do not claim to have audited, reviewed, noticed, or visited something unless the supplied evidence supports that claim.
+- Sound like a real human business-development email, not a mass-mail template.
+- 80-140 words maximum.
+- One clear, low-friction CTA.
+- No fake urgency, no exaggerated claims, no emojis.
 - Return ONLY:
 Subject: ...
 Email:
@@ -659,7 +716,7 @@ Email:
 
 async function saveLeadForUser(db, userId, prospect, notes = "") {
   const website = normalizeUrl(prospect.website);
-  let duplicateQuery = db.from("leads").select("*").limit(1);
+  let duplicateQuery = db.from("leads").select("*").eq("user_id", userId).limit(1);
   if (website) {
     duplicateQuery = duplicateQuery.eq("website", website);
   } else {
@@ -874,7 +931,7 @@ async function runAutopilotJob(job) {
           prospect,
           prospect.contactEmail
             ? `Autopilot discovered public contact email: ${prospect.contactEmail}`
-            : "Autopilot discovered lead. No verified public email was found."
+            : "Autopilot discovered lead. No public email was found in the live evidence."
         );
 
         if (!savedResult.duplicate) saved += 1;
@@ -923,6 +980,8 @@ async function runAutopilotJob(job) {
           subject,
           text: body,
           replyTo: SMTP_FROM || SMTP_USER,
+          senderName: sender.name,
+          senderCompany: sender.company,
         });
 
         emailed += 1;
@@ -986,8 +1045,8 @@ async function runAutopilotJob(job) {
       ...job.lastResult,
       message:
         emailed > 0
-          ? `Hunter found ${strong.length} strong prospects and sent ${emailed} verified-email outreach message(s).`
-          : `Hunter found ${strong.length} strong prospects. No email was sent because no eligible verified-email target was available.`
+          ? `Hunter found ${strong.length} strong prospects and sent ${emailed} public-email outreach message(s).`
+          : `Hunter found ${strong.length} strong prospects. No email was sent because no eligible eligible public-email target was available.`
     };
   } finally {
     job.running = false;
@@ -1235,6 +1294,7 @@ Rules:
           await sendEmail({
             to: NOTIFY_EMAIL,
             subject: `🔥 Interested lead reply: ${lead.business_name}`,
+            notification: true,
             text:
 `AI Client Hunter detected an interested prospect reply.
 
@@ -1300,7 +1360,7 @@ const aiLimiter = rateLimit({
 });
 app.use("/api", apiLimiter);
 
-app.get("/", (req, res) => res.json({ success: true, message: "AI Client Hunter API is running", version: "9.0.0-cloud-persistent" }));
+app.get("/", (req, res) => res.json({ success: true, message: "AI Client Hunter API is running", version: "10.0.0-personalized-outreach" }));
 app.get("/api/health", (req, res) => res.json({
   success: true,
   status: "healthy",
@@ -1312,6 +1372,7 @@ app.get("/api/health", (req, res) => res.json({
     smtp: emailTransportConfigured(),
     imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
     smtpAccount: SMTP_USER || null,
+    smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
     autopilot: true,
     persistentAutopilot: Boolean(supabaseAdmin),
     persistentReplyMonitor: Boolean(supabaseAdmin),
@@ -1333,6 +1394,7 @@ app.get("/api/config-status", (req, res) => res.json({
   autopilotIntervalMinutes: AUTOPILOT_INTERVAL_MINUTES,
   autopilotMinScore: AUTOPILOT_MIN_SCORE,
   model: GEMINI_MODEL,
+  smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
 }));
 app.get("/api/notifications", requireAuth, async (req, res) => {
   try {
@@ -1475,25 +1537,54 @@ app.post("/api/outreach", requireAuth, aiLimiter, async (req, res) => {
   try {
     const lead = req.body?.lead || {};
     const channel = cleanString(req.body?.channel, "Email");
-    if (!["Email", "WhatsApp", "LinkedIn"].includes(channel)) return res.status(400).json({ success: false, error: "Invalid outreach channel." });
-    if (!cleanString(lead.businessName)) return res.status(400).json({ success: false, error: "Lead information is required." });
+    const senderName = cleanString(req.body?.senderName);
+    const senderCompany = cleanString(req.body?.senderCompany);
+
+    if (!["Email", "WhatsApp", "LinkedIn"].includes(channel)) {
+      return res.status(400).json({ success: false, error: "Invalid outreach channel." });
+    }
+    if (!cleanString(lead.businessName)) {
+      return res.status(400).json({ success: false, error: "Lead information is required." });
+    }
+
+    if (channel === "Email") {
+      const text = await generateOutreachText(
+        {
+          ...lead,
+          contactName: normalizePersonName(lead.contactName),
+          contactRole: cleanString(lead.contactRole),
+        },
+        { name: senderName, company: senderCompany }
+      );
+      return res.json({ success: true, channel, text });
+    }
 
     const text = await generateWithGemini(`
-Write a personalized ${channel} outreach message.
-Business: ${lead.businessName}
+Write a personalized ${channel} outreach message TO this prospect.
+
+Prospect business: ${lead.businessName}
+Recipient name: ${normalizePersonName(lead.contactName) || "No reliable person name found"}
 Industry: ${lead.industry || "Unknown"}
 Location: ${lead.location || "Unknown"}
 Website: ${lead.website || "Unknown"}
 Likely need: ${lead.likelyNeed || "Unknown"}
-Why: ${lead.reason || "Unknown"}
-Service: ${lead.suggestedService || "Professional services"}
-Angle: ${lead.outreachAngle || "Unknown"}
-Never invent facts, names, metrics, emails or phone numbers. Treat likely need as a hypothesis.
-If Email, return Subject + Email. Otherwise return only the message.
+Why this prospect: ${lead.reason || "Unknown"}
+Service offered by us: ${lead.suggestedService || "Professional services"}
+Outreach angle: ${lead.outreachAngle || "Unknown"}
+Our sender name: ${senderName || "Not provided"}
+Our company: ${senderCompany || "Not provided"}
+
+Rules:
+- Write TO the prospect, never to the sender.
+- If no reliable recipient name exists, address the business/team naturally.
+- Never invent facts, names, metrics, emails or phone numbers.
+- Treat likely need as a hypothesis.
+- Keep it concise, natural and professional.
 `);
+
     res.json({ success: true, channel, text });
   } catch (error) {
-    console.error("Outreach:", error?.message || error);
+    console.error("Outreach:", errorMessage(error));
     res.status(500).json({ success: false, error: "Outreach generation failed." });
   }
 });
@@ -1772,6 +1863,7 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
     const result = await sendEmail({
       to,
       subject: "AI Client Hunter — email test",
+      notification: true,
       text:
         "Email delivery is working. AI Client Hunter can send outreach from the configured SMTP account.",
     });
