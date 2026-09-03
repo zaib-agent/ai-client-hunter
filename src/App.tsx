@@ -1,4 +1,3 @@
-// AI Client Hunter — FINAL frontend replacement
 import {
   useCallback,
   useEffect,
@@ -1051,6 +1050,7 @@ function App() {
   } | null>(null)
   const [emailReady, setEmailReady] = useState(false)
   const [replyMonitorReady, setReplyMonitorReady] = useState(false)
+  const [serviceStatusLoading, setServiceStatusLoading] = useState(true)
 
   // Sender profile used by AI-generated outreach. Saved locally in this browser.
   const readLocalSetting = (key: string): string => {
@@ -1065,7 +1065,7 @@ function App() {
     try {
       localStorage.setItem(key, value)
     } catch {
-      // The app can continue working even when browser storage is blocked.
+      // Browser storage may be blocked; the app can continue working.
     }
   }
 
@@ -1706,34 +1706,34 @@ function App() {
   // AUTOPILOT
   // =========================================================
   const refreshAutopilotStatus = useCallback(async () => {
+    setServiceStatusLoading(true)
     try {
-      // Public service-status check keeps SMTP/IMAP indicators accurate even
-      // when the authenticated job endpoint is temporarily unavailable.
-      const publicResponse = await fetch(`${API_URL}/api/config-status`, { cache: 'no-store' })
-      const publicData = await publicResponse.json()
-      if (publicResponse.ok && publicData.success) {
-        setEmailReady(Boolean(publicData.services?.smtp))
-        setReplyMonitorReady(Boolean(publicData.services?.imap))
+      // Infrastructure readiness comes only from the public config endpoint.
+      // The authenticated autopilot endpoint is used only for job state/stats.
+      try {
+        const publicResponse = await fetch(`${API_URL}/api/config-status`, { cache: 'no-store' })
+        const publicData = await publicResponse.json()
+        if (publicResponse.ok && publicData.success) {
+          setEmailReady(Boolean(publicData.services?.smtp))
+          setReplyMonitorReady(Boolean(publicData.services?.imap))
+        }
+      } catch (statusError) {
+        console.error('Service config status:', statusError)
       }
 
       if (!session?.access_token) return
+
       const response = await apiFetch('/api/autopilot/status', {}, session.access_token)
       const data = await response.json()
       if (!response.ok || !data.success) return
+
       setAutopilotActive(Boolean(data.active))
       setAutopilotLastRun(data.lastRunAt || null)
       setAutopilotStats(data.lastResult || null)
-
-      // Only overwrite the public service flags when the authenticated
-      // endpoint actually returns those fields.
-      if (typeof data.emailReady === 'boolean') {
-        setEmailReady(data.emailReady)
-      }
-      if (typeof data.replyMonitorReady === 'boolean') {
-        setReplyMonitorReady(data.replyMonitorReady)
-      }
     } catch (error) {
       console.error('Autopilot status:', error)
+    } finally {
+      setServiceStatusLoading(false)
     }
   }, [session?.access_token])
 
@@ -2358,7 +2358,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               <div className="panel-header">
                 <div>
                   <h2>Autonomous Client Hunter</h2>
-                  <p>AI repeatedly finds strong prospects, saves them, generates outreach and sends public-email outreach automatically.</p>
+                  <p>AI repeatedly finds strong prospects, saves them, generates recipient-aware outreach and sends it to public business email addresses automatically.</p>
                 </div>
                 <span className={autopilotActive ? 'autopilot-badge active' : 'autopilot-badge'}>
                   {autopilotActive ? '● AUTOPILOT ON' : '○ OFF'}
@@ -2378,7 +2378,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
               <div className="autopilot-actions">
                 {!autopilotActive ? (
-                  <button className="primary-button" onClick={startAutopilot} disabled={autopilotLoading || !emailReady}>
+                  <button className="primary-button" onClick={startAutopilot} disabled={autopilotLoading || serviceStatusLoading || !emailReady}>
                     {autopilotLoading ? 'Starting...' : '▶ Start Autonomous Hunter'}
                   </button>
                 ) : (
@@ -2389,9 +2389,11 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                 <button className="text-button" onClick={runAutopilotNow} disabled={autopilotLoading}>
                   {autopilotLoading ? 'Running...' : '↻ Run Now'}
                 </button>
-                {!emailReady && (
+                {serviceStatusLoading ? (
+                  <span className="autopilot-warning">Checking email service status...</span>
+                ) : !emailReady ? (
                   <span className="autopilot-warning">SMTP is not configured, so automatic email sending is disabled.</span>
-                )}
+                ) : null}
               </div>
 
               {autopilotMessage && <p className="autopilot-message">{autopilotMessage}</p>}
@@ -3240,7 +3242,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
             {selectedLead.contactEmail && (
               <>
-                <h4>Contact Email</h4>
+                <h4>Public Contact Email</h4>
                 <p>{selectedLead.contactEmail}</p>
               </>
             )}
@@ -3374,10 +3376,8 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 }
 
 function RootApp() {
-  const params = new URLSearchParams(window.location.search)
   const isPasswordReset =
-    params.get('reset') === '1' ||
-    params.get('type') === 'recovery'
+    new URLSearchParams(window.location.search).get('reset') === '1'
 
   return isPasswordReset
     ? <PasswordResetScreen />
