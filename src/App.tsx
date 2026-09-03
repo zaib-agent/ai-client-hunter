@@ -1,3 +1,4 @@
+// AI Client Hunter — FINAL frontend replacement
 import {
   useCallback,
   useEffect,
@@ -1052,8 +1053,24 @@ function App() {
   const [replyMonitorReady, setReplyMonitorReady] = useState(false)
 
   // Sender profile used by AI-generated outreach. Saved locally in this browser.
-  const [senderName, setSenderName] = useState(() => localStorage.getItem('ach_sender_name') || '')
-  const [senderCompany, setSenderCompany] = useState(() => localStorage.getItem('ach_sender_company') || '')
+  const readLocalSetting = (key: string): string => {
+    try {
+      return localStorage.getItem(key) || ''
+    } catch {
+      return ''
+    }
+  }
+
+  const writeLocalSetting = (key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+      // The app can continue working even when browser storage is blocked.
+    }
+  }
+
+  const [senderName, setSenderName] = useState(() => readLocalSetting('ach_sender_name'))
+  const [senderCompany, setSenderCompany] = useState(() => readLocalSetting('ach_sender_company'))
 
   // =========================================================
   // AUTH INITIALIZATION
@@ -1706,8 +1723,15 @@ function App() {
       setAutopilotActive(Boolean(data.active))
       setAutopilotLastRun(data.lastRunAt || null)
       setAutopilotStats(data.lastResult || null)
-      setEmailReady(Boolean(data.emailReady))
-      setReplyMonitorReady(Boolean(data.replyMonitorReady))
+
+      // Only overwrite the public service flags when the authenticated
+      // endpoint actually returns those fields.
+      if (typeof data.emailReady === 'boolean') {
+        setEmailReady(data.emailReady)
+      }
+      if (typeof data.replyMonitorReady === 'boolean') {
+        setReplyMonitorReady(data.replyMonitorReady)
+      }
     } catch (error) {
       console.error('Autopilot status:', error)
     }
@@ -2951,7 +2975,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     value={senderName}
                     onChange={(event) => {
                       setSenderName(event.target.value)
-                      localStorage.setItem('ach_sender_name', event.target.value)
+                      writeLocalSetting('ach_sender_name', event.target.value)
                     }}
                     placeholder="e.g. Jahanzaib"
                     style={{ width: '100%', boxSizing: 'border-box' }}
@@ -2965,7 +2989,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     value={senderCompany}
                     onChange={(event) => {
                       setSenderCompany(event.target.value)
-                      localStorage.setItem('ach_sender_company', event.target.value)
+                      writeLocalSetting('ach_sender_company', event.target.value)
                     }}
                     placeholder="e.g. Jahanzaib Digital"
                     style={{ width: '100%', boxSizing: 'border-box' }}
@@ -3216,7 +3240,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
             {selectedLead.contactEmail && (
               <>
-                <h4>Verified Contact Email</h4>
+                <h4>Contact Email</h4>
                 <p>{selectedLead.contactEmail}</p>
               </>
             )}
@@ -3350,8 +3374,10 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 }
 
 function RootApp() {
+  const params = new URLSearchParams(window.location.search)
   const isPasswordReset =
-    new URLSearchParams(window.location.search).get('reset') === '1'
+    params.get('reset') === '1' ||
+    params.get('type') === 'recovery'
 
   return isPasswordReset
     ? <PasswordResetScreen />
