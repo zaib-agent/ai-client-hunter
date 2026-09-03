@@ -34,6 +34,9 @@ const AUTH_REDIRECT_URL =
   import.meta.env.VITE_AUTH_REDIRECT_URL?.trim() ||
   window.location.origin
 
+const PASSWORD_RESET_REDIRECT_URL =
+  `${AUTH_REDIRECT_URL.replace(/\/$/, '')}/?reset=1`
+
 const supabase =
   SUPABASE_URL && SUPABASE_ANON_KEY
     ? createClient(
@@ -218,6 +221,49 @@ function AuthScreen() {
 
   const [message, setMessage] =
     useState('')
+
+  const [forgotPassword, setForgotPassword] =
+    useState(false)
+
+  const sendPasswordReset = async () => {
+    setError('')
+    setMessage('')
+
+    const cleanEmail = email.trim().toLowerCase()
+
+    if (!cleanEmail) {
+      setError('Please enter your email address first.')
+      return
+    }
+
+    if (!supabase) {
+      setError('Supabase authentication is not configured. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const { error: resetError } =
+        await supabase.auth.resetPasswordForEmail(
+          cleanEmail,
+          { redirectTo: PASSWORD_RESET_REDIRECT_URL }
+        )
+
+      if (resetError) throw resetError
+
+      setMessage('Password reset email sent. Check your inbox.')
+    } catch (error) {
+      console.error('Password reset error:', error)
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to send password reset email.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const submit = async (
     event: FormEvent
@@ -428,7 +474,7 @@ function AuthScreen() {
             </button>
           </div>
 
-          <form onSubmit={submit}>
+          {!forgotPassword && <form onSubmit={submit}>
             <label
               style={{
                 display: 'block',
@@ -490,6 +536,32 @@ function AuthScreen() {
                   '15px',
               }}
             />
+
+            {mode === 'login' && !forgotPassword && (
+              <div
+                style={{
+                  textAlign: 'right',
+                  marginTop: '-7px',
+                  marginBottom: '15px',
+                }}
+              >
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setForgotPassword(true)
+                    setError('')
+                    setMessage('')
+                  }}
+                  style={{
+                    padding: '4px 0',
+                    fontSize: '14px',
+                  }}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+            )}
 
             {mode === 'signup' && (
               <>
@@ -571,6 +643,226 @@ function AuthScreen() {
                 : mode === 'login'
                   ? 'Sign In'
                   : 'Create Account'}
+            </button>
+          </form>}
+
+          {forgotPassword && (
+            <div>
+              <p style={{ marginBottom: '18px', lineHeight: 1.6 }}>
+                Enter your email and we will send you a secure password reset link.
+              </p>
+
+              <label style={{ display: 'block', marginBottom: '7px' }}>
+                Email
+              </label>
+
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  marginBottom: '15px',
+                }}
+              />
+
+              {error && (
+                <div style={{
+                  padding: '12px',
+                  marginBottom: '15px',
+                  borderRadius: '10px',
+                  background: 'rgba(220, 53, 69, .10)',
+                }}>
+                  {error}
+                </div>
+              )}
+
+              {message && (
+                <div style={{
+                  padding: '12px',
+                  marginBottom: '15px',
+                  borderRadius: '10px',
+                  background: 'rgba(25, 135, 84, .10)',
+                }}>
+                  {message}
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="primary-button"
+                disabled={loading}
+                onClick={sendPasswordReset}
+                style={{ width: '100%', marginBottom: '10px' }}
+              >
+                {loading ? 'Sending...' : 'Send Reset Link'}
+              </button>
+
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  setForgotPassword(false)
+                  setError('')
+                  setMessage('')
+                }}
+                style={{ width: '100%' }}
+              >
+                Back to Sign In
+              </button>
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
+  )
+}
+
+// ============================================================
+// PASSWORD RESET SCREEN
+// ============================================================
+
+function PasswordResetScreen() {
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  const updatePassword = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    setMessage('')
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.')
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+
+    if (!supabase) {
+      setError('Supabase authentication is not configured.')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const { error: updateError } =
+        await supabase.auth.updateUser({ password })
+
+      if (updateError) throw updateError
+
+      setMessage('Password updated successfully. Redirecting to sign in...')
+
+      await supabase.auth.signOut()
+
+      setTimeout(() => {
+        window.location.href = window.location.origin
+      }, 1200)
+    } catch (error) {
+      console.error('Password update error:', error)
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to update password.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      <main
+        className="main-content"
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '30px',
+          boxSizing: 'border-box',
+        }}
+      >
+        <section className="panel" style={{ width: 'min(460px, 100%)' }}>
+          <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+            <div className="brand-mark" style={{ margin: '0 auto 16px' }}>
+              AI
+            </div>
+            <h1 style={{ marginBottom: '8px' }}>Set New Password</h1>
+            <p>Create a new password for your AI Client Hunter account.</p>
+          </div>
+
+          <form onSubmit={updatePassword}>
+            <label style={{ display: 'block', marginBottom: '7px' }}>
+              New Password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Minimum 6 characters"
+              autoComplete="new-password"
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                marginBottom: '15px',
+              }}
+            />
+
+            <label style={{ display: 'block', marginBottom: '7px' }}>
+              Confirm New Password
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Repeat your new password"
+              autoComplete="new-password"
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                marginBottom: '15px',
+              }}
+            />
+
+            {error && (
+              <div style={{
+                padding: '12px',
+                marginBottom: '15px',
+                borderRadius: '10px',
+                background: 'rgba(220, 53, 69, .10)',
+              }}>
+                {error}
+              </div>
+            )}
+
+            {message && (
+              <div style={{
+                padding: '12px',
+                marginBottom: '15px',
+                borderRadius: '10px',
+                background: 'rgba(25, 135, 84, .10)',
+              }}>
+                {message}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={loading}
+              style={{ width: '100%' }}
+            >
+              {loading ? 'Updating...' : 'Update Password'}
             </button>
           </form>
         </section>
@@ -3044,4 +3336,13 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
   )
 }
 
-export default App
+function RootApp() {
+  const isPasswordReset =
+    new URLSearchParams(window.location.search).get('reset') === '1'
+
+  return isPasswordReset
+    ? <PasswordResetScreen />
+    : <App />
+}
+
+export default RootApp
