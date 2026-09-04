@@ -29,11 +29,16 @@ const SUPABASE_SERVICE_ROLE_KEY = (
   process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 ).trim();
 
-const FRONTEND_URLS = (
-  process.env.FRONTEND_URLS ||
-  process.env.FRONTEND_URL ||
-  "http://localhost:5173"
-).split(",").map((v) => v.trim()).filter(Boolean);
+const FRONTEND_URLS = [
+  ...(process.env.FRONTEND_URLS || "").split(","),
+  ...(process.env.FRONTEND_URL || "").split(","),
+  "https://ai-client-hunter-1.onrender.com",
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+].map((v) => v.trim().replace(/\/$/, "")).filter(Boolean);
+
+const ALLOWED_CORS_ORIGINS = new Set(FRONTEND_URLS);
 
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 100);
@@ -1335,11 +1340,23 @@ app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || FRONTEND_URLS.includes(origin)) return callback(null, true);
-    return callback(new Error("CORS origin not allowed."));
+    // Server-to-server requests have no Origin header.
+    if (!origin) return callback(null, true);
+
+    const normalizedOrigin = origin.trim().replace(/\/$/, "");
+    if (ALLOWED_CORS_ORIGINS.has(normalizedOrigin)) {
+      return callback(null, true);
+    }
+
+    console.warn(`CORS blocked origin: ${origin}`);
+    // Returning false avoids throwing a CORS error through Express while
+    // still refusing to grant the browser access-control headers.
+    return callback(null, false);
   },
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: false,
+  optionsSuccessStatus: 204,
 }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
