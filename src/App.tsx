@@ -1050,27 +1050,10 @@ function App() {
   } | null>(null)
   const [emailReady, setEmailReady] = useState(false)
   const [replyMonitorReady, setReplyMonitorReady] = useState(false)
-  const [serviceStatusLoading, setServiceStatusLoading] = useState(true)
 
   // Sender profile used by AI-generated outreach. Saved locally in this browser.
-  const readLocalSetting = (key: string): string => {
-    try {
-      return localStorage.getItem(key) || ''
-    } catch {
-      return ''
-    }
-  }
-
-  const writeLocalSetting = (key: string, value: string) => {
-    try {
-      localStorage.setItem(key, value)
-    } catch {
-      // Browser storage may be blocked; the app can continue working.
-    }
-  }
-
-  const [senderName, setSenderName] = useState(() => readLocalSetting('ach_sender_name'))
-  const [senderCompany, setSenderCompany] = useState(() => readLocalSetting('ach_sender_company'))
+  const [senderName, setSenderName] = useState(() => localStorage.getItem('ach_sender_name') || '')
+  const [senderCompany, setSenderCompany] = useState(() => localStorage.getItem('ach_sender_company') || '')
 
   // =========================================================
   // AUTH INITIALIZATION
@@ -1706,34 +1689,27 @@ function App() {
   // AUTOPILOT
   // =========================================================
   const refreshAutopilotStatus = useCallback(async () => {
-    setServiceStatusLoading(true)
     try {
-      // Infrastructure readiness comes only from the public config endpoint.
-      // The authenticated autopilot endpoint is used only for job state/stats.
-      try {
-        const publicResponse = await fetch(`${API_URL}/api/config-status`, { cache: 'no-store' })
-        const publicData = await publicResponse.json()
-        if (publicResponse.ok && publicData.success) {
-          setEmailReady(Boolean(publicData.services?.smtp))
-          setReplyMonitorReady(Boolean(publicData.services?.imap))
-        }
-      } catch (statusError) {
-        console.error('Service config status:', statusError)
+      // Public service-status check keeps SMTP/IMAP indicators accurate even
+      // when the authenticated job endpoint is temporarily unavailable.
+      const publicResponse = await fetch(`${API_URL}/api/config-status`, { cache: 'no-store' })
+      const publicData = await publicResponse.json()
+      if (publicResponse.ok && publicData.success) {
+        setEmailReady(Boolean(publicData.services?.smtp))
+        setReplyMonitorReady(Boolean(publicData.services?.imap))
       }
 
       if (!session?.access_token) return
-
       const response = await apiFetch('/api/autopilot/status', {}, session.access_token)
       const data = await response.json()
       if (!response.ok || !data.success) return
-
       setAutopilotActive(Boolean(data.active))
       setAutopilotLastRun(data.lastRunAt || null)
       setAutopilotStats(data.lastResult || null)
+      // SMTP/IMAP readiness comes only from the public config-status endpoint above.
+      // Do not overwrite it with the authenticated autopilot status response.
     } catch (error) {
       console.error('Autopilot status:', error)
-    } finally {
-      setServiceStatusLoading(false)
     }
   }, [session?.access_token])
 
@@ -2358,7 +2334,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               <div className="panel-header">
                 <div>
                   <h2>Autonomous Client Hunter</h2>
-                  <p>AI repeatedly finds strong prospects, saves them, generates recipient-aware outreach and sends it to public business email addresses automatically.</p>
+                  <p>AI repeatedly finds strong prospects, saves them, generates outreach and sends public-email outreach automatically.</p>
                 </div>
                 <span className={autopilotActive ? 'autopilot-badge active' : 'autopilot-badge'}>
                   {autopilotActive ? '● AUTOPILOT ON' : '○ OFF'}
@@ -2378,7 +2354,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
               <div className="autopilot-actions">
                 {!autopilotActive ? (
-                  <button className="primary-button" onClick={startAutopilot} disabled={autopilotLoading || serviceStatusLoading || !emailReady}>
+                  <button className="primary-button" onClick={startAutopilot} disabled={autopilotLoading || !emailReady}>
                     {autopilotLoading ? 'Starting...' : '▶ Start Autonomous Hunter'}
                   </button>
                 ) : (
@@ -2389,11 +2365,9 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                 <button className="text-button" onClick={runAutopilotNow} disabled={autopilotLoading}>
                   {autopilotLoading ? 'Running...' : '↻ Run Now'}
                 </button>
-                {serviceStatusLoading ? (
-                  <span className="autopilot-warning">Checking email service status...</span>
-                ) : !emailReady ? (
+                {!emailReady && (
                   <span className="autopilot-warning">SMTP is not configured, so automatic email sending is disabled.</span>
-                ) : null}
+                )}
               </div>
 
               {autopilotMessage && <p className="autopilot-message">{autopilotMessage}</p>}
@@ -2977,7 +2951,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     value={senderName}
                     onChange={(event) => {
                       setSenderName(event.target.value)
-                      writeLocalSetting('ach_sender_name', event.target.value)
+                      localStorage.setItem('ach_sender_name', event.target.value)
                     }}
                     placeholder="e.g. Jahanzaib"
                     style={{ width: '100%', boxSizing: 'border-box' }}
@@ -2991,7 +2965,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     value={senderCompany}
                     onChange={(event) => {
                       setSenderCompany(event.target.value)
-                      writeLocalSetting('ach_sender_company', event.target.value)
+                      localStorage.setItem('ach_sender_company', event.target.value)
                     }}
                     placeholder="e.g. Jahanzaib Digital"
                     style={{ width: '100%', boxSizing: 'border-box' }}
@@ -3242,7 +3216,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
             {selectedLead.contactEmail && (
               <>
-                <h4>Public Contact Email</h4>
+                <h4>Verified Contact Email</h4>
                 <p>{selectedLead.contactEmail}</p>
               </>
             )}
