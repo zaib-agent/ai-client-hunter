@@ -579,6 +579,14 @@ function emailTransportConfigured() {
   return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
 }
 
+async function verifySmtpTransport() {
+  if (!emailTransportConfigured() || !transporter) {
+    throw new Error("SMTP is not configured. Check SMTP_HOST, SMTP_USER and SMTP_PASS.");
+  }
+  await transporter.verify();
+  return true;
+}
+
 const transporter = emailTransportConfigured()
   ? nodemailer.createTransport({
       host: SMTP_HOST,
@@ -885,16 +893,47 @@ async function runAutopilotJob(job) {
   job.running = true;
 
   try {
+    // Do a real SMTP authentication check before spending time on prospecting.
+    // Presence of SMTP_* environment variables alone does not prove Gmail accepted
+    // the credentials. This makes failed credentials visible instead of silently
+    // producing "0 emails sent".
+    if (!emailTransportConfigured()) {
+      const message = "SMTP is not configured. Check SMTP_HOST, SMTP_USER and SMTP_PASS.";
+      job.lastRunAt = new Date().toISOString();
+      job.lastResult = {
+        found: 0, strong: 0, saved: 0, emailed: 0,
+        skippedEmailLimit: 0, skippedRecent: 0, emailFailures: 0,
+        smtpVerified: false, emailError: message,
+      };
+      return { success: true, ...job.lastResult, message };
+    }
+
+    try {
+      await verifySmtpTransport();
+    } catch (error) {
+      const message = errorMessage(error) || "SMTP verification failed.";
+      console.error("Autopilot SMTP verification failed:", message);
+      job.lastRunAt = new Date().toISOString();
+      job.lastResult = {
+        found: 0, strong: 0, saved: 0, emailed: 0,
+        skippedEmailLimit: 0, skippedRecent: 0, emailFailures: 0,
+        smtpVerified: false, emailError: message,
+      };
+      return {
+        success: true,
+        ...job.lastResult,
+        message: `SMTP connection/authentication failed: ${message}`,
+      };
+    }
+
     const sources = await discoverClients(job.config);
 
     if (!sources.length) {
       job.lastRunAt = new Date().toISOString();
       job.lastResult = {
-        found: 0,
-        strong: 0,
-        saved: 0,
-        emailed: 0,
-        skippedEmailLimit: 0,
+        found: 0, strong: 0, saved: 0, emailed: 0,
+        skippedEmailLimit: 0, skippedRecent: 0, emailFailures: 0,
+        smtpVerified: true,
         message: "No usable live web results were found.",
       };
       return { success: true, ...job.lastResult };
@@ -909,7 +948,9 @@ async function runAutopilotJob(job) {
     let saved = 0;
     let skippedEmailLimit = 0;
     let skippedRecent = 0;
+    let skippedNoEmail = 0;
     let emailFailures = 0;
+    const emailErrors = [];
 
     let sentToday = await countEmailsSentToday(job.db, job.userId);
 
@@ -948,7 +989,8 @@ async function runAutopilotJob(job) {
         continue;
       }
 
-      if (!prospect.contactEmail || !emailTransportConfigured()) {
+      if (!prospect.contactEmail) {
+        skippedNoEmail += 1;
         continue;
       }
 
@@ -1022,9 +1064,11 @@ async function runAutopilotJob(job) {
         }
       } catch (error) {
         emailFailures += 1;
+        const detail = errorMessage(error) || "Unknown SMTP/email error.";
+        emailErrors.push(`${prospect.businessName}: ${detail}`);
         console.error(
           `Autopilot email failed for ${prospect.businessName} <${prospect.contactEmail}>:`,
-          errorMessage(error)
+          detail
         );
       }
 
@@ -1041,7 +1085,10 @@ async function runAutopilotJob(job) {
       emailed,
       skippedEmailLimit,
       skippedRecent,
+      skippedNoEmail,
       emailFailures,
+      emailErrors: emailErrors.slice(0, 5),
+      smtpVerified: true,
       fallbackQualification: false,
     };
 
@@ -1051,7 +1098,7 @@ async function runAutopilotJob(job) {
       message:
         emailed > 0
           ? `Hunter found ${strong.length} strong prospects and sent ${emailed} public-email outreach message(s).`
-          : `Hunter found ${strong.length} strong prospects. No email was sent because no eligible eligible public-email target was available.`
+          : `Hunter found ${strong.length} strong prospects, but sent 0 emails. Recent=${skippedRecent}, no-email=${skippedNoEmail}, daily-limit=${skippedEmailLimit}, send-failures=${emailFailures}.`,
     };
   } finally {
     job.running = false;
@@ -1875,7 +1922,7 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
       });
     }
 
-    await transporter.verify();
+    await verifySmtpTransport();
 
     const result = await sendEmail({
       to,
