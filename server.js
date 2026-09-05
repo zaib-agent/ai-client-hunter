@@ -71,26 +71,10 @@ const SMTP_FROM_NAME = (process.env.SMTP_FROM_NAME || "AI Client Hunter").trim()
 const NOTIFY_EMAIL = (process.env.NOTIFY_EMAIL || SMTP_USER).trim();
 
 const BREVO_API_KEY = (process.env.BREVO_API_KEY || "").trim();
-const BREVO_FROM_EMAIL = (process.env.BREVO_FROM_EMAIL || SMTP_FROM || SMTP_USER).trim();
-const BREVO_FROM_NAME = (process.env.BREVO_FROM_NAME || SMTP_FROM_NAME || "AI Client Hunter").trim();
-const BREVO_REPLY_TO = (process.env.BREVO_REPLY_TO || NOTIFY_EMAIL || BREVO_FROM_EMAIL).trim();
-
+const BREVO_FROM_EMAIL = (process.env.BREVO_FROM_EMAIL || "").trim();
+const BREVO_FROM_NAME = (process.env.BREVO_FROM_NAME || "AI Client Hunter").trim();
+const BREVO_REPLY_TO = (process.env.BREVO_REPLY_TO || BREVO_FROM_EMAIL).trim();
 const BREVO_TIMEOUT_MS = Math.max(5000, Number(process.env.BREVO_TIMEOUT_MS || 15000));
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = BREVO_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } catch (error) {
-    if (error?.name === "AbortError") {
-      throw new Error(`Brevo request timed out after ${timeoutMs}ms. Render could not complete the HTTPS request to Brevo.`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 const IMAP_HOST = (process.env.IMAP_HOST || "").trim();
 const IMAP_PORT = Number(process.env.IMAP_PORT || 993);
@@ -601,17 +585,39 @@ function smtpConfigured() {
   return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
 }
 
+function brevoPartiallyConfigured() {
+  return Boolean(BREVO_API_KEY || BREVO_FROM_EMAIL);
+}
+
 function brevoConfigured() {
   return Boolean(BREVO_API_KEY && BREVO_FROM_EMAIL);
 }
 
 function emailTransportConfigured() {
-  return brevoConfigured() || smtpConfigured();
+  return brevoConfigured() || (!brevoPartiallyConfigured() && smtpConfigured());
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = BREVO_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Brevo HTTPS request timed out after ${timeoutMs}ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function verifyBrevoTransport() {
-  if (!brevoConfigured()) {
-    throw new Error("Brevo is not configured. Check BREVO_API_KEY and BREVO_FROM_EMAIL.");
+  if (!BREVO_API_KEY) {
+    throw new Error("BREVO_API_KEY is missing on the backend Render service.");
+  }
+  if (!BREVO_FROM_EMAIL) {
+    throw new Error("BREVO_FROM_EMAIL is missing on the backend Render service.");
   }
 
   const response = await fetchWithTimeout("https://api.brevo.com/v3/account", {
@@ -738,7 +744,10 @@ async function sendViaBrevo({ to, subject, text, replyTo, senderName, senderComp
 
 async function sendEmail({ to, subject, text, replyTo, senderName, senderCompany, notification = false }) {
   // Brevo uses HTTPS, so it works from Render Free where SMTP egress is blocked.
-  if (brevoConfigured()) {
+  if (brevoPartiallyConfigured()) {
+    if (!brevoConfigured()) {
+      throw new Error("Brevo is partially configured. Both BREVO_API_KEY and BREVO_FROM_EMAIL are required.");
+    }
     return sendViaBrevo({
       to,
       subject,
@@ -1642,7 +1651,7 @@ const aiLimiter = rateLimit({
 });
 app.use("/api", apiLimiter);
 
-app.get("/", (req, res) => res.json({ success: true, message: "AI Client Hunter API is running", version: "10.0.0-personalized-outreach" }));
+app.get("/", (req, res) => res.json({ success: true, message: "AI Client Hunter API is running", version: "11.0.0-brevo-first-diagnostics" }));
 app.get("/api/health", (req, res) => res.json({
   success: true,
   status: "healthy",
@@ -1653,6 +1662,8 @@ app.get("/api/health", (req, res) => res.json({
     supabase: Boolean(supabaseAuthClient),
     smtp: emailTransportConfigured(),
     brevo: brevoConfigured(),
+    brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
+    brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
     imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
     smtpAccount: SMTP_USER || null,
     smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
@@ -1672,6 +1683,8 @@ app.get("/api/config-status", (req, res) => res.json({
     supabase: Boolean(supabaseAuthClient),
     smtp: emailTransportConfigured(),
     brevo: brevoConfigured(),
+    brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
+    brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
     imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
     persistentAutopilot: Boolean(supabaseAdmin),
     persistentReplyMonitor: Boolean(supabaseAdmin),
@@ -1681,6 +1694,8 @@ app.get("/api/config-status", (req, res) => res.json({
   model: GEMINI_MODEL,
   smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
   brevoFromEmail: BREVO_FROM_EMAIL || null,
+  brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
+  brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
 }));
 app.get("/api/notifications", requireAuth, async (req, res) => {
   try {
@@ -1973,7 +1988,9 @@ app.post("/api/autopilot/start", requireAuth, async (req, res) => {
     if (!emailTransportConfigured()) {
       return res.status(503).json({
         success: false,
-        error: "SMTP email is not configured. Add SMTP settings first.",
+        error: brevoPartiallyConfigured()
+          ? "Brevo configuration is incomplete. Add both BREVO_API_KEY and BREVO_FROM_EMAIL to the backend Render service."
+          : "No email transport is configured. Use Brevo HTTPS email with BREVO_API_KEY and BREVO_FROM_EMAIL.",
       });
     }
 
@@ -2128,13 +2145,22 @@ app.post("/api/autopilot/stop", requireAuth, async (req, res) => {
 });
 
 app.post("/api/email/test", requireAuth, async (req, res) => {
-  let stage = "start";
   try {
+    if (brevoPartiallyConfigured() && !brevoConfigured()) {
+      return res.status(503).json({
+        success: false,
+        stage: "configuration",
+        error: "Brevo is partially configured. Backend Render must have both BREVO_API_KEY and BREVO_FROM_EMAIL.",
+        brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
+        brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
+      });
+    }
+
     if (!emailTransportConfigured()) {
       return res.status(503).json({
         success: false,
         stage: "configuration",
-        error: "No email transport is configured. Add BREVO_API_KEY and BREVO_FROM_EMAIL."
+        error: "No email transport is configured. Use Brevo HTTPS with BREVO_API_KEY and BREVO_FROM_EMAIL.",
       });
     }
 
@@ -2142,43 +2168,52 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
     if (!to) {
       return res.status(400).json({
         success: false,
-        stage: "recipient",
-        error: "Test email recipient is missing."
+        error: "Test email recipient is missing.",
       });
     }
 
     if (brevoConfigured()) {
-      stage = "brevo-account-verification";
-      await verifyBrevoTransport();
-      stage = "brevo-send";
+      try {
+        await verifyBrevoTransport();
+      } catch (error) {
+        error.stage = "brevo-verification";
+        throw error;
+      }
     } else {
-      stage = "smtp-verification";
-      await verifySmtpTransport();
-      stage = "smtp-send";
+      try {
+        await verifySmtpTransport();
+      } catch (error) {
+        error.stage = "smtp-verification";
+        throw error;
+      }
     }
 
-    const result = await sendEmail({
+    let result;
+    try {
+      result = await sendEmail({
       to,
       subject: "AI Client Hunter — email test",
       notification: true,
-      text: "Email delivery is working. AI Client Hunter can send outreach using the configured email transport."
+      text:
+        "Email delivery is working. AI Client Hunter can send outreach using the configured email transport.",
     });
+    } catch (error) {
+      error.stage = brevoConfigured() ? "brevo-send" : "smtp-send";
+      throw error;
+    }
 
     res.json({
       success: true,
       sentTo: to,
       provider: result?.provider || "smtp",
       messageId: cleanString(result?.messageId),
-      stage: "complete"
     });
   } catch (error) {
-    const detail = errorMessage(error) || "Unknown email error.";
-    console.error(`Email test failed at ${stage}:`, detail);
+    console.error("Email test:", errorMessage(error));
     res.status(502).json({
       success: false,
-      stage,
-      provider: brevoConfigured() ? "brevo" : "smtp",
-      error: `Email test failed at ${stage}: ${detail}`
+      stage: error?.stage || "unknown",
+      error: `Email test failed at ${error?.stage || "unknown"}: ${errorMessage(error) || "Unknown email error."}`,
     });
   }
 });
@@ -2241,7 +2276,7 @@ app.listen(PORT, "0.0.0.0", async () => {
     verifyBrevoTransport()
       .then(() => console.log("Brevo API verification: SUCCESS"))
       .catch((error) => console.error("Brevo API verification: FAILED —", errorMessage(error)));
-  } else if (transporter) {
+  } else if (!brevoPartiallyConfigured() && transporter) {
     // SMTP may be blocked on Render Free; this is informational only.
     transporter.verify()
       .then(() => console.log("SMTP verification: SUCCESS"))
