@@ -70,6 +70,11 @@ const SMTP_FROM = (process.env.SMTP_FROM || SMTP_USER).trim();
 const SMTP_FROM_NAME = (process.env.SMTP_FROM_NAME || "AI Client Hunter").trim();
 const NOTIFY_EMAIL = (process.env.NOTIFY_EMAIL || SMTP_USER).trim();
 
+const BREVO_API_KEY = (process.env.BREVO_API_KEY || "").trim();
+const BREVO_FROM_EMAIL = (process.env.BREVO_FROM_EMAIL || SMTP_FROM || SMTP_USER).trim();
+const BREVO_FROM_NAME = (process.env.BREVO_FROM_NAME || SMTP_FROM_NAME || "AI Client Hunter").trim();
+const BREVO_REPLY_TO = (process.env.BREVO_REPLY_TO || NOTIFY_EMAIL || BREVO_FROM_EMAIL).trim();
+
 const IMAP_HOST = (process.env.IMAP_HOST || "").trim();
 const IMAP_PORT = Number(process.env.IMAP_PORT || 993);
 const IMAP_SECURE = String(process.env.IMAP_SECURE ?? "true").toLowerCase() === "true";
@@ -575,19 +580,53 @@ ${evidence}
 
 }
 
-function emailTransportConfigured() {
+function smtpConfigured() {
   return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
 }
 
+function brevoConfigured() {
+  return Boolean(BREVO_API_KEY && BREVO_FROM_EMAIL);
+}
+
+function emailTransportConfigured() {
+  return brevoConfigured() || smtpConfigured();
+}
+
+async function verifyBrevoTransport() {
+  if (!brevoConfigured()) {
+    throw new Error("Brevo is not configured. Check BREVO_API_KEY and BREVO_FROM_EMAIL.");
+  }
+
+  const response = await fetch("https://api.brevo.com/v3/account", {
+    method: "GET",
+    headers: {
+      "api-key": BREVO_API_KEY,
+      Accept: "application/json",
+    },
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const detail =
+      data?.message ||
+      data?.code ||
+      `Brevo API verification failed with HTTP ${response.status}.`;
+    throw new Error(detail);
+  }
+
+  return true;
+}
+
 async function verifySmtpTransport() {
-  if (!emailTransportConfigured() || !transporter) {
+  if (!smtpConfigured() || !transporter) {
     throw new Error("SMTP is not configured. Check SMTP_HOST, SMTP_USER and SMTP_PASS.");
   }
   await transporter.verify();
   return true;
 }
 
-const transporter = emailTransportConfigured()
+const transporter = smtpConfigured()
   ? nodemailer.createTransport({
       host: SMTP_HOST,
       port: SMTP_PORT,
@@ -597,6 +636,7 @@ const transporter = emailTransportConfigured()
   : null;
 
 function normalizePersonName(value) {
+
   const text = cleanString(value).replace(/[\r\n]+/g, " ").trim();
   if (!text || /^(unknown|not known|n\/a|none|null)$/i.test(text)) return "";
   if (text.length > 80) return "";
@@ -617,8 +657,87 @@ function formatSenderAddress(sender = {}) {
   return { name, address };
 }
 
+function parseEmailAddress(value) {
+  const raw = cleanString(value);
+  const match = raw.match(/<([^<>@\s]+@[^<>@\s]+)>/);
+  return (match?.[1] || raw).trim();
+}
+
+async function sendViaBrevo({ to, subject, text, replyTo, senderName, senderCompany, notification = false }) {
+  if (!brevoConfigured()) {
+    throw new Error("Brevo is not configured. Add BREVO_API_KEY and verify BREVO_FROM_EMAIL.");
+  }
+
+  const displayName = safeHeaderName(
+    notification
+      ? BREVO_FROM_NAME
+      : senderCompany || senderName || BREVO_FROM_NAME,
+    "AI Client Hunter"
+  );
+
+  const payload = {
+    sender: {
+      name: displayName,
+      email: BREVO_FROM_EMAIL,
+    },
+    to: [{ email: to }],
+    subject,
+    textContent: text,
+  };
+
+  const effectiveReplyTo = cleanString(replyTo) || BREVO_REPLY_TO || BREVO_FROM_EMAIL;
+  if (effectiveReplyTo) {
+    payload.replyTo = {
+      email: parseEmailAddress(effectiveReplyTo),
+    };
+  }
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": BREVO_API_KEY,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const detail =
+      data?.message ||
+      data?.code ||
+      `Brevo email failed with HTTP ${response.status}.`;
+    throw new Error(detail);
+  }
+
+  return {
+    messageId: cleanString(data?.messageId),
+    provider: "brevo",
+    raw: data,
+  };
+}
+
 async function sendEmail({ to, subject, text, replyTo, senderName, senderCompany, notification = false }) {
-  if (!transporter) throw new Error("SMTP email is not configured.");
+  // Brevo uses HTTPS, so it works from Render Free where SMTP egress is blocked.
+  if (brevoConfigured()) {
+    return sendViaBrevo({
+      to,
+      subject,
+      text,
+      replyTo: replyTo || BREVO_REPLY_TO || NOTIFY_EMAIL,
+      senderName,
+      senderCompany,
+      notification,
+    });
+  }
+
+  if (!transporter) {
+    throw new Error(
+      "No email transport is available. On Render Free, SMTP is blocked; configure Brevo HTTPS email with BREVO_API_KEY and BREVO_FROM_EMAIL."
+    );
+  }
 
   const from = notification
     ? { name: safeHeaderName(SMTP_FROM_NAME, "AI Client Hunter"), address: SMTP_FROM || SMTP_USER }
@@ -893,39 +1012,10 @@ async function runAutopilotJob(job) {
   job.running = true;
 
   try {
-    // Do a real SMTP authentication check before spending time on prospecting.
-    // Presence of SMTP_* environment variables alone does not prove Gmail accepted
-    // the credentials. This makes failed credentials visible instead of silently
-    // producing "0 emails sent".
-    if (!emailTransportConfigured()) {
-      const message = "SMTP is not configured. Check SMTP_HOST, SMTP_USER and SMTP_PASS.";
-      job.lastRunAt = new Date().toISOString();
-      job.lastResult = {
-        found: 0, strong: 0, saved: 0, emailed: 0,
-        skippedEmailLimit: 0, skippedRecent: 0, emailFailures: 0,
-        smtpVerified: false, emailError: message,
-      };
-      return { success: true, ...job.lastResult, message };
-    }
-
-    try {
-      await verifySmtpTransport();
-    } catch (error) {
-      const message = errorMessage(error) || "SMTP verification failed.";
-      console.error("Autopilot SMTP verification failed:", message);
-      job.lastRunAt = new Date().toISOString();
-      job.lastResult = {
-        found: 0, strong: 0, saved: 0, emailed: 0,
-        skippedEmailLimit: 0, skippedRecent: 0, emailFailures: 0,
-        smtpVerified: false, emailError: message,
-      };
-      return {
-        success: true,
-        ...job.lastResult,
-        message: `SMTP connection/authentication failed: ${message}`,
-      };
-    }
-
+    // Do not block discovery on SMTP. Render Free blocks outbound SMTP,
+    // so the hunter must still research and save leads even when email delivery
+    // is unavailable. If Resend is configured, delivery uses HTTPS and works
+    // on Render Free.
     const sources = await discoverClients(job.config);
 
     if (!sources.length) {
@@ -933,7 +1023,8 @@ async function runAutopilotJob(job) {
       job.lastResult = {
         found: 0, strong: 0, saved: 0, emailed: 0,
         skippedEmailLimit: 0, skippedRecent: 0, emailFailures: 0,
-        smtpVerified: true,
+        smtpVerified: Boolean(smtpConfigured() && !brevoConfigured()),
+        provider: brevoConfigured() ? "brevo" : smtpConfigured() ? "smtp" : "none",
         message: "No usable live web results were found.",
       };
       return { success: true, ...job.lastResult };
@@ -1008,6 +1099,14 @@ async function runAutopilotJob(job) {
 
       if (alreadyContacted) {
         skippedRecent += 1;
+        continue;
+      }
+
+      if (!emailTransportConfigured()) {
+        emailFailures += 1;
+        emailErrors.push(
+          `${prospect.businessName}: No email transport. Configure BREVO_API_KEY + BREVO_FROM_EMAIL (recommended on Render Free), or use a paid Render instance for SMTP.`
+        );
         continue;
       }
 
@@ -1088,7 +1187,8 @@ async function runAutopilotJob(job) {
       skippedNoEmail,
       emailFailures,
       emailErrors: emailErrors.slice(0, 5),
-      smtpVerified: true,
+      smtpVerified: Boolean(smtpConfigured() && !brevoConfigured()),
+      provider: brevoConfigured() ? "brevo" : smtpConfigured() ? "smtp" : "none",
       fallbackQualification: false,
     };
 
@@ -1434,9 +1534,11 @@ app.get("/api/health", (req, res) => res.json({
     tavily: Boolean(TAVILY_API_KEY),
     supabase: Boolean(supabaseAuthClient),
     smtp: emailTransportConfigured(),
+    brevo: brevoConfigured(),
     imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
     smtpAccount: SMTP_USER || null,
     smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
+    brevoFromEmail: BREVO_FROM_EMAIL || null,
     autopilot: true,
     persistentAutopilot: Boolean(supabaseAdmin),
     persistentReplyMonitor: Boolean(supabaseAdmin),
@@ -1451,6 +1553,7 @@ app.get("/api/config-status", (req, res) => res.json({
     tavily: Boolean(TAVILY_API_KEY),
     supabase: Boolean(supabaseAuthClient),
     smtp: emailTransportConfigured(),
+    brevo: brevoConfigured(),
     imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
     persistentAutopilot: Boolean(supabaseAdmin),
     persistentReplyMonitor: Boolean(supabaseAdmin),
@@ -1459,6 +1562,7 @@ app.get("/api/config-status", (req, res) => res.json({
   autopilotMinScore: AUTOPILOT_MIN_SCORE,
   model: GEMINI_MODEL,
   smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
+  brevoFromEmail: BREVO_FROM_EMAIL || null,
 }));
 app.get("/api/notifications", requireAuth, async (req, res) => {
   try {
@@ -1910,7 +2014,8 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
     if (!emailTransportConfigured()) {
       return res.status(503).json({
         success: false,
-        error: "SMTP is not configured. Check SMTP_HOST, SMTP_USER and SMTP_PASS.",
+        error:
+          "No email transport is configured. On Render Free, use Brevo HTTPS email with BREVO_API_KEY and BREVO_FROM_EMAIL.",
       });
     }
 
@@ -1922,26 +2027,31 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
       });
     }
 
-    await verifySmtpTransport();
+    if (brevoConfigured()) {
+      await verifyBrevoTransport();
+    } else {
+      await verifySmtpTransport();
+    }
 
     const result = await sendEmail({
       to,
       subject: "AI Client Hunter — email test",
       notification: true,
       text:
-        "Email delivery is working. AI Client Hunter can send outreach from the configured SMTP account.",
+        "Email delivery is working. AI Client Hunter can send outreach using the configured email transport.",
     });
 
     res.json({
       success: true,
       sentTo: to,
+      provider: result?.provider || "smtp",
       messageId: cleanString(result?.messageId),
     });
   } catch (error) {
     console.error("Email test:", errorMessage(error));
     res.status(502).json({
       success: false,
-      error: `SMTP test failed: ${errorMessage(error) || "Unknown SMTP error."}`,
+      error: `Email test failed: ${errorMessage(error) || "Unknown email error."}`,
     });
   }
 });
@@ -1984,13 +2094,13 @@ async function restoreAutopilotAfterStartup() {
 
 app.listen(PORT, "0.0.0.0", async () => {
   console.log("==============================================");
-  console.log("AI CLIENT HUNTER V9 — CLOUD PERSISTENT AGENT");
+  console.log("AI CLIENT HUNTER — CLOUD PERSISTENT AGENT");
   console.log(`Server: 0.0.0.0:${PORT}`);
   console.log(`Gemini: ${GEMINI_API_KEY ? "CONNECTED" : "NOT CONFIGURED"}`);
   console.log(`Tavily: ${TAVILY_API_KEY ? "CONNECTED" : "NOT CONFIGURED"}`);
   console.log(`Supabase: ${supabaseAuthClient ? "CONNECTED" : "NOT CONFIGURED"}`);
   console.log(`Supabase Admin: ${supabaseAdmin ? "CONNECTED" : "NOT CONFIGURED"}`);
-  console.log(`SMTP: ${emailTransportConfigured() ? "CONNECTED" : "NOT CONFIGURED"}`);
+  console.log(`Email transport: ${brevoConfigured() ? "BREVO HTTPS" : smtpConfigured() ? "SMTP" : "NOT CONFIGURED"}`);
   console.log(`IMAP: ${IMAP_HOST && IMAP_USER && IMAP_PASS ? "CONNECTED" : "NOT CONFIGURED"}`);
   console.log(`Persistent Autopilot: ${supabaseAdmin ? "ENABLED" : "DISABLED"}`);
   console.log(`Persistent Reply Monitor: ${supabaseAdmin ? "ENABLED" : "DISABLED"}`);
@@ -2000,13 +2110,18 @@ app.listen(PORT, "0.0.0.0", async () => {
   console.log(`Gemini retries: ${GEMINI_MAX_RETRIES}`);
   console.log("==============================================");
 
-  if (transporter) {
+  if (brevoConfigured()) {
+    verifyBrevoTransport()
+      .then(() => console.log("Brevo API verification: SUCCESS"))
+      .catch((error) => console.error("Brevo API verification: FAILED —", errorMessage(error)));
+  } else if (transporter) {
+    // SMTP may be blocked on Render Free; this is informational only.
     transporter.verify()
       .then(() => console.log("SMTP verification: SUCCESS"))
       .catch((error) => console.error("SMTP verification: FAILED —", errorMessage(error)));
   }
 
-  if (IMAP_HOST && IMAP_USER && IMAP_PASS && transporter && supabaseAdmin) {
+  if (IMAP_HOST && IMAP_USER && IMAP_PASS && supabaseAdmin) {
     setInterval(() => {
       pollReplies().catch((error) =>
         console.error("Reply monitor:", errorMessage(error))
@@ -2018,7 +2133,7 @@ app.listen(PORT, "0.0.0.0", async () => {
     );
   } else {
     console.log(
-      "Reply monitor not started: requires IMAP + SMTP + SUPABASE_SERVICE_ROLE_KEY."
+      "Reply monitor not started: requires IMAP + SUPABASE_SERVICE_ROLE_KEY."
     );
   }
 

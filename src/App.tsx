@@ -1047,6 +1047,15 @@ function App() {
     strong?: number
     saved?: number
     emailed?: number
+    skippedRecent?: number
+    skippedNoEmail?: number
+    skippedEmailLimit?: number
+    emailFailures?: number
+    emailErrors?: string[]
+    smtpVerified?: boolean
+    fallbackQualification?: boolean
+    provider?: string
+    message?: string
   } | null>(null)
   const [emailReady, setEmailReady] = useState(false)
   const [replyMonitorReady, setReplyMonitorReady] = useState(false)
@@ -1793,7 +1802,11 @@ function App() {
       if (!response.ok || !data.success) throw new Error(data.error || 'Autonomous hunt failed.')
       setAutopilotLastRun(new Date().toISOString())
       setAutopilotStats(data)
-      setAutopilotMessage(`Run complete: ${data.found || 0} found, ${data.emailed || 0} emails sent.`)
+      setAutopilotMessage(
+        data.message ||
+        `Run complete: ${data.found || 0} found, ${data.emailed || 0} emails sent. ` +
+        `Recent: ${data.skippedRecent || 0}, no-email: ${data.skippedNoEmail || 0}, failures: ${data.emailFailures || 0}.`
+      )
       await loadLeads()
     } catch (error) {
       setAutopilotMessage(error instanceof Error ? error.message : 'Autonomous hunt failed.')
@@ -2373,12 +2386,32 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               {autopilotMessage && <p className="autopilot-message">{autopilotMessage}</p>}
 
               {autopilotStats && (
-                <div className="autopilot-stats">
-                  <span>Found <strong>{autopilotStats.found || 0}</strong></span>
-                  <span>Strong <strong>{autopilotStats.strong || 0}</strong></span>
-                  <span>Saved <strong>{autopilotStats.saved || 0}</strong></span>
-                  <span>Emailed <strong>{autopilotStats.emailed || 0}</strong></span>
-                </div>
+                <>
+                  <div className="autopilot-stats">
+                    <span>Found <strong>{autopilotStats.found || 0}</strong></span>
+                    <span>Strong <strong>{autopilotStats.strong || 0}</strong></span>
+                    <span>Saved <strong>{autopilotStats.saved || 0}</strong></span>
+                    <span>Emailed <strong>{autopilotStats.emailed || 0}</strong></span>
+                  </div>
+
+                  {(autopilotStats.skippedRecent ||
+                    autopilotStats.skippedNoEmail ||
+                    autopilotStats.skippedEmailLimit ||
+                    autopilotStats.emailFailures) ? (
+                    <small className="autopilot-last-run">
+                      Skipped recently: {autopilotStats.skippedRecent || 0} ·
+                      no public email: {autopilotStats.skippedNoEmail || 0} ·
+                      daily limit: {autopilotStats.skippedEmailLimit || 0} ·
+                      email failures: {autopilotStats.emailFailures || 0}
+                    </small>
+                  ) : null}
+
+                  {Array.isArray(autopilotStats.emailErrors) && autopilotStats.emailErrors.length > 0 && (
+                    <small className="autopilot-last-run">
+                      Email issue: {autopilotStats.emailErrors[0]}
+                    </small>
+                  )}
+                </>
               )}
 
               {autopilotLastRun && (
