@@ -75,6 +75,23 @@ const BREVO_FROM_EMAIL = (process.env.BREVO_FROM_EMAIL || SMTP_FROM || SMTP_USER
 const BREVO_FROM_NAME = (process.env.BREVO_FROM_NAME || SMTP_FROM_NAME || "AI Client Hunter").trim();
 const BREVO_REPLY_TO = (process.env.BREVO_REPLY_TO || NOTIFY_EMAIL || BREVO_FROM_EMAIL).trim();
 
+const BREVO_TIMEOUT_MS = Math.max(5000, Number(process.env.BREVO_TIMEOUT_MS || 15000));
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = BREVO_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Brevo request timed out after ${timeoutMs}ms. Render could not complete the HTTPS request to Brevo.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const IMAP_HOST = (process.env.IMAP_HOST || "").trim();
 const IMAP_PORT = Number(process.env.IMAP_PORT || 993);
 const IMAP_SECURE = String(process.env.IMAP_SECURE ?? "true").toLowerCase() === "true";
@@ -597,7 +614,7 @@ async function verifyBrevoTransport() {
     throw new Error("Brevo is not configured. Check BREVO_API_KEY and BREVO_FROM_EMAIL.");
   }
 
-  const response = await fetch("https://api.brevo.com/v3/account", {
+  const response = await fetchWithTimeout("https://api.brevo.com/v3/account", {
     method: "GET",
     headers: {
       "api-key": BREVO_API_KEY,
@@ -692,7 +709,7 @@ async function sendViaBrevo({ to, subject, text, replyTo, senderName, senderComp
     };
   }
 
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const response = await fetchWithTimeout("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
       "api-key": BREVO_API_KEY,
@@ -1011,17 +1028,22 @@ async function runAutopilotJob(job) {
   job.running = true;
 
   try {
-    // Do not block discovery on SMTP. Render Free blocks outbound SMTP,
-    // so the hunter must still research and save leads even when email delivery
-    // is unavailable. If Brevo is configured, delivery uses HTTPS and works
-    // on Render Free.
     const sources = await discoverClients(job.config);
 
     if (!sources.length) {
       job.lastRunAt = new Date().toISOString();
       job.lastResult = {
-        found: 0, strong: 0, saved: 0, emailed: 0,
-        skippedEmailLimit: 0, skippedRecent: 0, emailFailures: 0,
+        found: 0,
+        strong: 0,
+        saved: 0,
+        emailed: 0,
+        skippedEmailLimit: 0,
+        skippedRecent: 0,
+        skippedNoEmail: 0,
+        emailFailures: 0,
+        leadSaveFailures: 0,
+        emailErrors: [],
+        leadErrors: [],
         smtpVerified: Boolean(smtpConfigured() && !brevoConfigured()),
         provider: brevoConfigured() ? "brevo" : smtpConfigured() ? "smtp" : "none",
         message: "No usable live web results were found.",
@@ -1040,7 +1062,10 @@ async function runAutopilotJob(job) {
     let skippedRecent = 0;
     let skippedNoEmail = 0;
     let emailFailures = 0;
+    let leadSaveFailures = 0;
+
     const emailErrors = [];
+    const leadErrors = [];
 
     let sentToday = await countEmailsSentToday(job.db, job.userId);
 
@@ -1049,33 +1074,47 @@ async function runAutopilotJob(job) {
       company: cleanString(job.config.senderCompany),
     };
 
-    // The database outreach_log is the source of truth for deduplication.
-    // Do NOT keep an additional process-memory sent set here. A stale in-memory
-    // set can silently skip every prospect while the UI shows Recent=0,
-    // no-email=0, daily-limit=0 and send-failures=0.
     for (const prospect of strong) {
-      let savedResult;
+      const recipientEmail = cleanString(prospect.contactEmail).toLowerCase();
+
+      // IMPORTANT:
+      // A database/CRM save problem must NEVER silently stop the email workflow.
+      // The previous version did `continue` here, which produced:
+      // strong > 0, saved=0, emailed=0, recent=0, no-email=0,
+      // daily-limit=0, send-failures=0.
+      let savedResult = {
+        duplicate: false,
+        lead: null,
+        saveError: null,
+      };
 
       try {
         savedResult = await saveLeadForUser(
           job.db,
           job.userId,
           prospect,
-          prospect.contactEmail
-            ? `Autopilot discovered public contact email: ${prospect.contactEmail}`
+          recipientEmail
+            ? `Autopilot discovered public contact email: ${recipientEmail}`
             : "Autopilot discovered lead. No public email was found in the live evidence."
         );
 
         if (!savedResult.duplicate) saved += 1;
       } catch (error) {
-        console.error(
-          `Lead save failed for ${prospect.businessName}:`,
-          errorMessage(error)
-        );
-        continue;
-      }
+        leadSaveFailures += 1;
+        const detail = errorMessage(error) || "Unknown database lead-save error.";
+        leadErrors.push(`${prospect.businessName}: ${detail}`);
 
-      const recipientEmail = cleanString(prospect.contactEmail).toLowerCase();
+        console.error(
+          `Lead save failed for ${prospect.businessName}, but email workflow will continue:`,
+          detail
+        );
+
+        savedResult = {
+          duplicate: false,
+          lead: null,
+          saveError: detail,
+        };
+      }
 
       if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
         skippedNoEmail += 1;
@@ -1087,12 +1126,23 @@ async function runAutopilotJob(job) {
         continue;
       }
 
-      const alreadyContacted = await contactedRecently(
-        job.db,
-        job.userId,
-        savedResult.lead?.id || null,
-        recipientEmail
-      );
+      let alreadyContacted = false;
+
+      try {
+        alreadyContacted = await contactedRecently(
+          job.db,
+          job.userId,
+          savedResult.lead?.id || null,
+          recipientEmail
+        );
+      } catch (error) {
+        // Do not silently skip because a deduplication lookup has a DB problem.
+        // Record the issue and let the durable provider/send path decide.
+        console.warn(
+          `Recent outreach lookup failed for ${prospect.businessName}; continuing without DB dedupe:`,
+          errorMessage(error)
+        );
+      }
 
       if (alreadyContacted) {
         skippedRecent += 1;
@@ -1102,7 +1152,7 @@ async function runAutopilotJob(job) {
       if (!emailTransportConfigured()) {
         emailFailures += 1;
         emailErrors.push(
-          `${prospect.businessName}: No email transport. Configure BREVO_API_KEY + BREVO_FROM_EMAIL (recommended on Render Free), or use a paid Render instance for SMTP.`
+          `${prospect.businessName}: No email transport. Configure BREVO_API_KEY + BREVO_FROM_EMAIL.`
         );
         continue;
       }
@@ -1117,11 +1167,15 @@ async function runAutopilotJob(job) {
           message.match(/^Subject:\s*(.+)$/im)?.[1]?.trim() ||
           `Quick idea for ${prospect.businessName}`;
 
-        const body = message
-          .replace(/^Subject:\s*.+$/im, "")
-          .replace(/^Email:\s*/im, "")
-          .trim() ||
-          fallbackOutreachText({ ...prospect, contactEmail: recipientEmail }, sender)
+        const body =
+          message
+            .replace(/^Subject:\s*.+$/im, "")
+            .replace(/^Email:\s*/im, "")
+            .trim() ||
+          fallbackOutreachText(
+            { ...prospect, contactEmail: recipientEmail },
+            sender
+          )
             .replace(/^Subject:\s*.+$/im, "")
             .replace(/^Email:\s*/im, "")
             .trim();
@@ -1140,56 +1194,75 @@ async function runAutopilotJob(job) {
           senderCompany: sender.company,
         });
 
-        // Count the provider-accepted delivery immediately. Do not wait for
-        // optional database logging to succeed before recording the send.
+        // Brevo/SMTP accepted the message. Count this immediately.
         emailed += 1;
         sentToday += 1;
 
         const now = new Date().toISOString();
 
+        // CRM updates are secondary and must not change a successful send to "unsent".
         if (savedResult.lead?.id) {
-          const { error: updateError } = await job.db
-            .from("leads")
-            .update({
-              status: "Contacted",
-              contact_email: recipientEmail,
-              outreach_subject: subject,
-              outreach_body: body,
-              last_contacted_at: now,
-              notes: `${savedResult.lead.notes || ""}\nAutopilot email sent via ${mailResult?.provider || "email"}: ${now}`.trim(),
-              updated_at: now,
-            })
-            .eq("id", savedResult.lead.id)
-            .eq("user_id", job.userId);
+          try {
+            const { error: updateError } = await job.db
+              .from("leads")
+              .update({
+                status: "Contacted",
+                contact_email: recipientEmail,
+                outreach_subject: subject,
+                outreach_body: body,
+                last_contacted_at: now,
+                notes: `${savedResult.lead.notes || ""}\nAutopilot email sent via ${
+                  mailResult?.provider || "email"
+                }: ${now}`.trim(),
+                updated_at: now,
+              })
+              .eq("id", savedResult.lead.id)
+              .eq("user_id", job.userId);
 
-          if (updateError) {
+            if (updateError) {
+              console.warn(
+                `Lead status update failed after email was accepted for ${prospect.businessName}:`,
+                updateError.message || updateError
+              );
+            }
+          } catch (updateError) {
             console.warn(
-              `Lead status update failed after email was accepted for ${prospect.businessName}:`,
-              updateError.message || updateError
+              `Lead status update crashed after email was accepted for ${prospect.businessName}:`,
+              errorMessage(updateError)
             );
           }
         }
 
-        // Keep the outreach log as the durable deduplication source.
-        await logOutreach(job.db, {
-          user_id: job.userId,
-          lead_id: savedResult.lead?.id || null,
-          recipient_email: recipientEmail,
-          subject,
-          body,
-          provider_id: cleanString(mailResult?.messageId),
-          sent_at: now,
-        });
+        // Outreach logging is also secondary to the successful provider acceptance.
+        try {
+          await logOutreach(job.db, {
+            user_id: job.userId,
+            lead_id: savedResult.lead?.id || null,
+            recipient_email: recipientEmail,
+            subject,
+            body,
+            provider_id: cleanString(mailResult?.messageId),
+            sent_at: now,
+          });
+        } catch (logError) {
+          console.warn(
+            `Outreach log failed after email was accepted for ${prospect.businessName}:`,
+            errorMessage(logError)
+          );
+        }
 
         console.log(
-          `Autopilot email accepted by ${mailResult?.provider || "email"} for ${prospect.businessName} <${recipientEmail}>`
+          `Autopilot email accepted by ${
+            mailResult?.provider || "email"
+          } for ${prospect.businessName} <${recipientEmail}>`
         );
       } catch (error) {
         emailFailures += 1;
-        const detail = errorMessage(error) || "Unknown SMTP/email error.";
+        const detail = errorMessage(error) || "Unknown email-provider error.";
         emailErrors.push(`${prospect.businessName}: ${detail}`);
+
         console.error(
-          `Autopilot email failed for ${prospect.businessName} <${prospect.contactEmail}>:`,
+          `Autopilot email failed for ${prospect.businessName} <${recipientEmail}>:`,
           detail
         );
       }
@@ -1200,6 +1273,7 @@ async function runAutopilotJob(job) {
     }
 
     job.lastRunAt = new Date().toISOString();
+
     job.lastResult = {
       found: prospects.length,
       strong: strong.length,
@@ -1209,19 +1283,40 @@ async function runAutopilotJob(job) {
       skippedRecent,
       skippedNoEmail,
       emailFailures,
+      leadSaveFailures,
       emailErrors: emailErrors.slice(0, 5),
+      leadErrors: leadErrors.slice(0, 5),
       smtpVerified: Boolean(smtpConfigured() && !brevoConfigured()),
-      provider: brevoConfigured() ? "brevo" : smtpConfigured() ? "smtp" : "none",
+      provider: brevoConfigured()
+        ? "brevo"
+        : smtpConfigured()
+          ? "smtp"
+          : "none",
       fallbackQualification: false,
     };
+
+    const dbSuffix =
+      leadSaveFailures > 0
+        ? ` CRM-save-failures=${leadSaveFailures}${
+            leadErrors.length
+              ? `. CRM errors: ${leadErrors.slice(0, 2).join(" | ")}`
+              : ""
+          }.`
+        : "";
 
     return {
       success: true,
       ...job.lastResult,
       message:
         emailed > 0
-          ? `Hunter found ${strong.length} strong prospects and sent ${emailed} public-email outreach message(s) using ${brevoConfigured() ? "Brevo" : "SMTP"}.`
-          : `Hunter found ${strong.length} strong prospects, but sent 0 emails. Recent=${skippedRecent}, no-email=${skippedNoEmail}, daily-limit=${skippedEmailLimit}, send-failures=${emailFailures}${emailErrors.length ? `. Errors: ${emailErrors.slice(0, 2).join(" | ")}` : ""}.`,
+          ? `Hunter found ${strong.length} strong prospects and sent ${emailed} public-email outreach message(s) using ${
+              brevoConfigured() ? "Brevo" : "SMTP"
+            }.${dbSuffix}`
+          : `Hunter found ${strong.length} strong prospects, but sent 0 emails. Recent=${skippedRecent}, no-email=${skippedNoEmail}, daily-limit=${skippedEmailLimit}, send-failures=${emailFailures}, CRM-save-failures=${leadSaveFailures}${
+              emailErrors.length
+                ? `. Email errors: ${emailErrors.slice(0, 2).join(" | ")}`
+                : ""
+            }${dbSuffix}`,
     };
   } finally {
     job.running = false;
@@ -2033,12 +2128,13 @@ app.post("/api/autopilot/stop", requireAuth, async (req, res) => {
 });
 
 app.post("/api/email/test", requireAuth, async (req, res) => {
+  let stage = "start";
   try {
     if (!emailTransportConfigured()) {
       return res.status(503).json({
         success: false,
-        error:
-          "No email transport is configured. On Render Free, use Brevo HTTPS email with BREVO_API_KEY and BREVO_FROM_EMAIL.",
+        stage: "configuration",
+        error: "No email transport is configured. Add BREVO_API_KEY and BREVO_FROM_EMAIL."
       });
     }
 
@@ -2046,22 +2142,26 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
     if (!to) {
       return res.status(400).json({
         success: false,
-        error: "Test email recipient is missing.",
+        stage: "recipient",
+        error: "Test email recipient is missing."
       });
     }
 
     if (brevoConfigured()) {
+      stage = "brevo-account-verification";
       await verifyBrevoTransport();
+      stage = "brevo-send";
     } else {
+      stage = "smtp-verification";
       await verifySmtpTransport();
+      stage = "smtp-send";
     }
 
     const result = await sendEmail({
       to,
       subject: "AI Client Hunter — email test",
       notification: true,
-      text:
-        "Email delivery is working. AI Client Hunter can send outreach using the configured email transport.",
+      text: "Email delivery is working. AI Client Hunter can send outreach using the configured email transport."
     });
 
     res.json({
@@ -2069,12 +2169,16 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
       sentTo: to,
       provider: result?.provider || "smtp",
       messageId: cleanString(result?.messageId),
+      stage: "complete"
     });
   } catch (error) {
-    console.error("Email test:", errorMessage(error));
+    const detail = errorMessage(error) || "Unknown email error.";
+    console.error(`Email test failed at ${stage}:`, detail);
     res.status(502).json({
       success: false,
-      error: `Email test failed: ${errorMessage(error) || "Unknown email error."}`,
+      stage,
+      provider: brevoConfigured() ? "brevo" : "smtp",
+      error: `Email test failed at ${stage}: ${detail}`
     });
   }
 });
