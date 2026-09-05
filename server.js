@@ -883,7 +883,6 @@ async function saveLeadForUser(db, userId, prospect, notes = "") {
 // AUTONOMOUS HUNTER
 // ============================================================
 const autopilotJobs = new Map();
-const autopilotSent = new Map();
 let replyPollRunning = false;
 
 function jobKey(userId) { return userId; }
@@ -1014,7 +1013,7 @@ async function runAutopilotJob(job) {
   try {
     // Do not block discovery on SMTP. Render Free blocks outbound SMTP,
     // so the hunter must still research and save leads even when email delivery
-    // is unavailable. If Resend is configured, delivery uses HTTPS and works
+    // is unavailable. If Brevo is configured, delivery uses HTTPS and works
     // on Render Free.
     const sources = await discoverClients(job.config);
 
@@ -1050,15 +1049,11 @@ async function runAutopilotJob(job) {
       company: cleanString(job.config.senderCompany),
     };
 
-    const sentSet = autopilotSent.get(job.userId) || new Set();
-    autopilotSent.set(job.userId, sentSet);
-
+    // The database outreach_log is the source of truth for deduplication.
+    // Do NOT keep an additional process-memory sent set here. A stale in-memory
+    // set can silently skip every prospect while the UI shows Recent=0,
+    // no-email=0, daily-limit=0 and send-failures=0.
     for (const prospect of strong) {
-      const targetKey =
-        `${prospect.website || prospect.businessName}|${prospect.contactEmail || ""}`.toLowerCase();
-
-      if (sentSet.has(targetKey)) continue;
-
       let savedResult;
 
       try {
@@ -1080,7 +1075,9 @@ async function runAutopilotJob(job) {
         continue;
       }
 
-      if (!prospect.contactEmail) {
+      const recipientEmail = cleanString(prospect.contactEmail).toLowerCase();
+
+      if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
         skippedNoEmail += 1;
         continue;
       }
@@ -1094,7 +1091,7 @@ async function runAutopilotJob(job) {
         job.db,
         job.userId,
         savedResult.lead?.id || null,
-        prospect.contactEmail
+        recipientEmail
       );
 
       if (alreadyContacted) {
@@ -1111,7 +1108,11 @@ async function runAutopilotJob(job) {
       }
 
       try {
-        const message = await generateOutreachText(prospect, sender);
+        const message = await generateOutreachText(
+          { ...prospect, contactEmail: recipientEmail },
+          sender
+        );
+
         const subject =
           message.match(/^Subject:\s*(.+)$/im)?.[1]?.trim() ||
           `Quick idea for ${prospect.businessName}`;
@@ -1119,48 +1120,70 @@ async function runAutopilotJob(job) {
         const body = message
           .replace(/^Subject:\s*.+$/im, "")
           .replace(/^Email:\s*/im, "")
-          .trim();
+          .trim() ||
+          fallbackOutreachText({ ...prospect, contactEmail: recipientEmail }, sender)
+            .replace(/^Subject:\s*.+$/im, "")
+            .replace(/^Email:\s*/im, "")
+            .trim();
 
         const mailResult = await sendEmail({
-          to: prospect.contactEmail,
+          to: recipientEmail,
           subject,
           text: body,
-          replyTo: SMTP_FROM || SMTP_USER,
+          replyTo:
+            BREVO_REPLY_TO ||
+            BREVO_FROM_EMAIL ||
+            SMTP_FROM ||
+            SMTP_USER ||
+            NOTIFY_EMAIL,
           senderName: sender.name,
           senderCompany: sender.company,
         });
 
+        // Count the provider-accepted delivery immediately. Do not wait for
+        // optional database logging to succeed before recording the send.
         emailed += 1;
         sentToday += 1;
-        sentSet.add(targetKey);
+
+        const now = new Date().toISOString();
 
         if (savedResult.lead?.id) {
-          const now = new Date().toISOString();
-
-          await job.db
+          const { error: updateError } = await job.db
             .from("leads")
             .update({
               status: "Contacted",
-              contact_email: prospect.contactEmail,
+              contact_email: recipientEmail,
               outreach_subject: subject,
               outreach_body: body,
               last_contacted_at: now,
-              notes: `${savedResult.lead.notes || ""}\nAutopilot email sent: ${now}`.trim(),
+              notes: `${savedResult.lead.notes || ""}\nAutopilot email sent via ${mailResult?.provider || "email"}: ${now}`.trim(),
               updated_at: now,
             })
             .eq("id", savedResult.lead.id)
             .eq("user_id", job.userId);
 
-          await logOutreach(job.db, {
-            user_id: job.userId,
-            lead_id: savedResult.lead.id,
-            recipient_email: prospect.contactEmail,
-            subject,
-            body,
-            provider_id: cleanString(mailResult?.messageId),
-            sent_at: now,
-          });
+          if (updateError) {
+            console.warn(
+              `Lead status update failed after email was accepted for ${prospect.businessName}:`,
+              updateError.message || updateError
+            );
+          }
         }
+
+        // Keep the outreach log as the durable deduplication source.
+        await logOutreach(job.db, {
+          user_id: job.userId,
+          lead_id: savedResult.lead?.id || null,
+          recipient_email: recipientEmail,
+          subject,
+          body,
+          provider_id: cleanString(mailResult?.messageId),
+          sent_at: now,
+        });
+
+        console.log(
+          `Autopilot email accepted by ${mailResult?.provider || "email"} for ${prospect.businessName} <${recipientEmail}>`
+        );
       } catch (error) {
         emailFailures += 1;
         const detail = errorMessage(error) || "Unknown SMTP/email error.";
@@ -1197,8 +1220,8 @@ async function runAutopilotJob(job) {
       ...job.lastResult,
       message:
         emailed > 0
-          ? `Hunter found ${strong.length} strong prospects and sent ${emailed} public-email outreach message(s).`
-          : `Hunter found ${strong.length} strong prospects, but sent 0 emails. Recent=${skippedRecent}, no-email=${skippedNoEmail}, daily-limit=${skippedEmailLimit}, send-failures=${emailFailures}.`,
+          ? `Hunter found ${strong.length} strong prospects and sent ${emailed} public-email outreach message(s) using ${brevoConfigured() ? "Brevo" : "SMTP"}.`
+          : `Hunter found ${strong.length} strong prospects, but sent 0 emails. Recent=${skippedRecent}, no-email=${skippedNoEmail}, daily-limit=${skippedEmailLimit}, send-failures=${emailFailures}${emailErrors.length ? `. Errors: ${emailErrors.slice(0, 2).join(" | ")}` : ""}.`,
     };
   } finally {
     job.running = false;
@@ -1281,7 +1304,7 @@ async function pollReplies() {
     !IMAP_HOST ||
     !IMAP_USER ||
     !IMAP_PASS ||
-    !transporter ||
+    !emailTransportConfigured() ||
     !NOTIFY_EMAIL ||
     !supabaseAdmin
   ) {
