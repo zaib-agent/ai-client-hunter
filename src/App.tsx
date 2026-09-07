@@ -1,4 +1,4 @@
-import {
+ import {
   useCallback,
   useEffect,
   useMemo,
@@ -1047,22 +1047,30 @@ function App() {
     strong?: number
     saved?: number
     emailed?: number
-    skippedRecent?: number
-    skippedNoEmail?: number
-    skippedEmailLimit?: number
-    emailFailures?: number
-    emailErrors?: string[]
-    smtpVerified?: boolean
-    fallbackQualification?: boolean
-    provider?: string
-    message?: string
   } | null>(null)
   const [emailReady, setEmailReady] = useState(false)
   const [replyMonitorReady, setReplyMonitorReady] = useState(false)
+  const [serviceStatusLoading, setServiceStatusLoading] = useState(true)
 
   // Sender profile used by AI-generated outreach. Saved locally in this browser.
-  const [senderName, setSenderName] = useState(() => localStorage.getItem('ach_sender_name') || '')
-  const [senderCompany, setSenderCompany] = useState(() => localStorage.getItem('ach_sender_company') || '')
+  const readLocalSetting = (key: string): string => {
+    try {
+      return localStorage.getItem(key) || ''
+    } catch {
+      return ''
+    }
+  }
+
+  const writeLocalSetting = (key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+      // Browser storage may be blocked; the app can continue working.
+    }
+  }
+
+  const [senderName, setSenderName] = useState(() => readLocalSetting('ach_sender_name'))
+  const [senderCompany, setSenderCompany] = useState(() => readLocalSetting('ach_sender_company'))
 
   // =========================================================
   // AUTH INITIALIZATION
@@ -1698,27 +1706,39 @@ function App() {
   // AUTOPILOT
   // =========================================================
   const refreshAutopilotStatus = useCallback(async () => {
+    setServiceStatusLoading(true)
     try {
-      // Public service-status check keeps SMTP/IMAP indicators accurate even
-      // when the authenticated job endpoint is temporarily unavailable.
-      const publicResponse = await fetch(`${API_URL}/api/config-status`, { cache: 'no-store' })
-      const publicData = await publicResponse.json()
-      if (publicResponse.ok && publicData.success) {
-        setEmailReady(Boolean(publicData.services?.smtp))
-        setReplyMonitorReady(Boolean(publicData.services?.imap))
+      // Infrastructure readiness comes only from the public config endpoint.
+      // The authenticated autopilot endpoint is used only for job state/stats.
+      try {
+        const publicResponse = await fetch(`${API_URL}/api/config-status`, { cache: 'no-store' })
+        const publicData = await publicResponse.json()
+        if (publicResponse.ok && publicData.success) {
+          setEmailReady(
+            Boolean(
+              publicData.services?.brevo ||
+              publicData.services?.smtp
+            )
+          )
+          setReplyMonitorReady(Boolean(publicData.services?.imap))
+        }
+      } catch (statusError) {
+        console.error('Service config status:', statusError)
       }
 
       if (!session?.access_token) return
+
       const response = await apiFetch('/api/autopilot/status', {}, session.access_token)
       const data = await response.json()
       if (!response.ok || !data.success) return
+
       setAutopilotActive(Boolean(data.active))
       setAutopilotLastRun(data.lastRunAt || null)
       setAutopilotStats(data.lastResult || null)
-      // SMTP/IMAP readiness comes only from the public config-status endpoint above.
-      // Do not overwrite it with the authenticated autopilot status response.
     } catch (error) {
       console.error('Autopilot status:', error)
+    } finally {
+      setServiceStatusLoading(false)
     }
   }, [session?.access_token])
 
@@ -1757,7 +1777,11 @@ function App() {
       setAutopilotActive(true)
       setAutopilotLastRun(new Date().toISOString())
       setAutopilotStats(data.firstRun || null)
-      setAutopilotMessage(`Autopilot is ON. First run found ${data.firstRun?.found || 0} leads and emailed ${data.firstRun?.emailed || 0}.`)
+      setAutopilotMessage(
+        `Autopilot is ON. First run found ${data.firstRun?.found || 0} leads and emailed ${data.firstRun?.emailed || 0}${
+          data.firstRun?.provider ? ` via ${data.firstRun.provider}` : ''
+        }.`
+      )
       await loadLeads()
     } catch (error) {
       setAutopilotMessage(error instanceof Error ? error.message : 'Unable to start autopilot.')
@@ -1803,9 +1827,9 @@ function App() {
       setAutopilotLastRun(new Date().toISOString())
       setAutopilotStats(data)
       setAutopilotMessage(
-        data.message ||
-        `Run complete: ${data.found || 0} found, ${data.emailed || 0} emails sent. ` +
-        `Recent: ${data.skippedRecent || 0}, no-email: ${data.skippedNoEmail || 0}, failures: ${data.emailFailures || 0}.`
+        `Run complete: ${data.found || 0} found, ${data.emailed || 0} emails sent${
+          data.provider ? ` via ${data.provider}` : ''
+        }.`
       )
       await loadLeads()
     } catch (error) {
@@ -2347,7 +2371,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               <div className="panel-header">
                 <div>
                   <h2>Autonomous Client Hunter</h2>
-                  <p>AI repeatedly finds strong prospects, saves them, generates outreach and sends public-email outreach automatically.</p>
+                  <p>AI repeatedly finds strong prospects, saves them, generates recipient-aware outreach and sends it to public business email addresses automatically.</p>
                 </div>
                 <span className={autopilotActive ? 'autopilot-badge active' : 'autopilot-badge'}>
                   {autopilotActive ? '● AUTOPILOT ON' : '○ OFF'}
@@ -2367,7 +2391,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
               <div className="autopilot-actions">
                 {!autopilotActive ? (
-                  <button className="primary-button" onClick={startAutopilot} disabled={autopilotLoading || !emailReady}>
+                  <button className="primary-button" onClick={startAutopilot} disabled={autopilotLoading || serviceStatusLoading || !emailReady}>
                     {autopilotLoading ? 'Starting...' : '▶ Start Autonomous Hunter'}
                   </button>
                 ) : (
@@ -2378,40 +2402,22 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                 <button className="text-button" onClick={runAutopilotNow} disabled={autopilotLoading}>
                   {autopilotLoading ? 'Running...' : '↻ Run Now'}
                 </button>
-                {!emailReady && (
-                  <span className="autopilot-warning">SMTP is not configured, so automatic email sending is disabled.</span>
-                )}
+                {serviceStatusLoading ? (
+                  <span className="autopilot-warning">Checking email service status...</span>
+                ) : !emailReady ? (
+                  <span className="autopilot-warning">Email service is not configured, so automatic email sending is disabled.</span>
+                ) : null}
               </div>
 
               {autopilotMessage && <p className="autopilot-message">{autopilotMessage}</p>}
 
               {autopilotStats && (
-                <>
-                  <div className="autopilot-stats">
-                    <span>Found <strong>{autopilotStats.found || 0}</strong></span>
-                    <span>Strong <strong>{autopilotStats.strong || 0}</strong></span>
-                    <span>Saved <strong>{autopilotStats.saved || 0}</strong></span>
-                    <span>Emailed <strong>{autopilotStats.emailed || 0}</strong></span>
-                  </div>
-
-                  {(autopilotStats.skippedRecent ||
-                    autopilotStats.skippedNoEmail ||
-                    autopilotStats.skippedEmailLimit ||
-                    autopilotStats.emailFailures) ? (
-                    <small className="autopilot-last-run">
-                      Skipped recently: {autopilotStats.skippedRecent || 0} ·
-                      no public email: {autopilotStats.skippedNoEmail || 0} ·
-                      daily limit: {autopilotStats.skippedEmailLimit || 0} ·
-                      email failures: {autopilotStats.emailFailures || 0}
-                    </small>
-                  ) : null}
-
-                  {Array.isArray(autopilotStats.emailErrors) && autopilotStats.emailErrors.length > 0 && (
-                    <small className="autopilot-last-run">
-                      Email issue: {autopilotStats.emailErrors[0]}
-                    </small>
-                  )}
-                </>
+                <div className="autopilot-stats">
+                  <span>Found <strong>{autopilotStats.found || 0}</strong></span>
+                  <span>Strong <strong>{autopilotStats.strong || 0}</strong></span>
+                  <span>Saved <strong>{autopilotStats.saved || 0}</strong></span>
+                  <span>Emailed <strong>{autopilotStats.emailed || 0}</strong></span>
+                </div>
               )}
 
               {autopilotLastRun && (
@@ -2984,7 +2990,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     value={senderName}
                     onChange={(event) => {
                       setSenderName(event.target.value)
-                      localStorage.setItem('ach_sender_name', event.target.value)
+                      writeLocalSetting('ach_sender_name', event.target.value)
                     }}
                     placeholder="e.g. Jahanzaib"
                     style={{ width: '100%', boxSizing: 'border-box' }}
@@ -2998,7 +3004,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     value={senderCompany}
                     onChange={(event) => {
                       setSenderCompany(event.target.value)
-                      localStorage.setItem('ach_sender_company', event.target.value)
+                      writeLocalSetting('ach_sender_company', event.target.value)
                     }}
                     placeholder="e.g. Jahanzaib Digital"
                     style={{ width: '100%', boxSizing: 'border-box' }}
@@ -3008,7 +3014,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
               <div className="info-card" style={{ marginTop: '14px' }}>
                 <strong>How outbound email identity works</strong>
-                <p>Emails are sent from the SMTP account configured on the backend. Your company name is used as the visible sender name, while the prospect's business/person name is used for the greeting. The agent never pretends to be the prospect.</p>
+                <p>Emails are sent through the configured backend email service. Brevo handles delivery when configured. Your company name is used as the visible sender name, while the prospect's business/person name is used for the greeting. The agent never pretends to be the prospect.</p>
               </div>
 
               <h4>
@@ -3033,7 +3039,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
               <div className="settings-grid" style={{ marginTop: '18px' }}>
                 <div className="info-card">
                   <strong>Automatic email outreach</strong>
-                  <p>{emailReady ? 'SMTP connected — AI can send outreach emails.' : 'SMTP not configured.'}</p>
+                  <p>{emailReady ? 'Email service connected — AI can send outreach emails.' : 'Email service not configured.'}</p>
                 </div>
                 <div className="info-card">
                   <strong>Interested-reply monitor</strong>
@@ -3048,8 +3054,23 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
                     if (!session?.access_token) return
                     try {
                       const response = await apiFetch('/api/email/test', { method: 'POST' }, session.access_token)
-                      const data = await response.json()
-                      alert(response.ok && data.success ? `Test email sent to ${data.sentTo}.` : (data.error || 'Email test failed.'))
+                      const raw = await response.text()
+                      let data: any = {}
+                      try {
+                        data = raw ? JSON.parse(raw) : {}
+                      } catch {
+                        data = { error: raw || `HTTP ${response.status}` }
+                      }
+
+                      if (response.ok && data.success) {
+                        alert(
+                          `✅ Test email sent\nProvider: ${data.provider || 'unknown'}\nTo: ${data.sentTo || 'unknown'}\nMessage ID: ${data.messageId || 'none'}`
+                        )
+                      } else {
+                        alert(
+                          `❌ Email test failed\nStage: ${data.stage || 'unknown'}\n${data.error || data.message || 'Unknown email error.'}`
+                        )
+                      }
                     } catch {
                       alert('Email test failed.')
                     }
@@ -3249,7 +3270,7 @@ VITE_AUTH_REDIRECT_URL=your_reachable_frontend_url`}
 
             {selectedLead.contactEmail && (
               <>
-                <h4>Verified Contact Email</h4>
+                <h4>Public Contact Email</h4>
                 <p>{selectedLead.contactEmail}</p>
               </>
             )}
