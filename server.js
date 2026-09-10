@@ -36,21 +36,46 @@ const FRONTEND_URLS = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:5175",
-].map((v) => v.trim().replace(/\/$/, "")).filter(Boolean);
+]
+  .map((v) => v.trim().replace(/\/$/, ""))
+  .filter(Boolean);
 
 const ALLOWED_CORS_ORIGINS = new Set(FRONTEND_URLS);
 
-const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+const RATE_LIMIT_WINDOW_MS = Number(
+  process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000
+);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 100);
 const AI_RATE_LIMIT_MAX = Number(process.env.AI_RATE_LIMIT_MAX || 30);
 
-const GEMINI_MAX_RETRIES = Math.max(1, Number(process.env.GEMINI_MAX_RETRIES || 4));
-const GEMINI_RETRY_BASE_MS = Math.max(500, Number(process.env.GEMINI_RETRY_BASE_MS || 1800));
-const TAVILY_MAX_RETRIES = Math.max(1, Number(process.env.TAVILY_MAX_RETRIES || 3));
-const TAVILY_TIMEOUT_MS = Math.max(10_000, Number(process.env.TAVILY_TIMEOUT_MS || 30_000));
-const AUTOPILOT_MAX_PROSPECTS = Math.max(1, Math.min(25, Number(process.env.AUTOPILOT_MAX_PROSPECTS || 10)));
-const AUTOPILOT_EMAIL_DELAY_MS = Math.max(0, Number(process.env.AUTOPILOT_EMAIL_DELAY_MS || 1500));
-const DAILY_EMAIL_LIMIT = Math.max(1, Number(process.env.DAILY_EMAIL_LIMIT || 25));
+const GEMINI_MAX_RETRIES = Math.max(
+  1,
+  Number(process.env.GEMINI_MAX_RETRIES || 4)
+);
+const GEMINI_RETRY_BASE_MS = Math.max(
+  500,
+  Number(process.env.GEMINI_RETRY_BASE_MS || 1800)
+);
+const TAVILY_MAX_RETRIES = Math.max(
+  1,
+  Number(process.env.TAVILY_MAX_RETRIES || 3)
+);
+const TAVILY_TIMEOUT_MS = Math.max(
+  10_000,
+  Number(process.env.TAVILY_TIMEOUT_MS || 30_000)
+);
+const AUTOPILOT_MAX_PROSPECTS = Math.max(
+  1,
+  Math.min(25, Number(process.env.AUTOPILOT_MAX_PROSPECTS || 10))
+);
+const AUTOPILOT_EMAIL_DELAY_MS = Math.max(
+  0,
+  Number(process.env.AUTOPILOT_EMAIL_DELAY_MS || 1500)
+);
+const DAILY_EMAIL_LIMIT = Math.max(
+  1,
+  Number(process.env.DAILY_EMAIL_LIMIT || 25)
+);
 const AUTOPILOT_STARTUP_GRACE_MS = Math.max(
   5_000,
   Number(process.env.AUTOPILOT_STARTUP_GRACE_MS || 10_000)
@@ -58,27 +83,42 @@ const AUTOPILOT_STARTUP_GRACE_MS = Math.max(
 const AUTOPILOT_JOB_TABLE = "autopilot_jobs";
 const REPLY_EVENT_TABLE = "reply_events";
 
-const AUTOPILOT_INTERVAL_MINUTES = Math.max(15, Number(process.env.AUTOPILOT_INTERVAL_MINUTES || 60));
-const AUTOPILOT_MIN_SCORE = Math.min(100, Math.max(0, Number(process.env.AUTOPILOT_MIN_SCORE || 75)));
+const AUTOPILOT_INTERVAL_MINUTES = Math.max(
+  15,
+  Number(process.env.AUTOPILOT_INTERVAL_MINUTES || 60)
+);
+const AUTOPILOT_MIN_SCORE = Math.min(
+  100,
+  Math.max(0, Number(process.env.AUTOPILOT_MIN_SCORE || 75))
+);
 
 const SMTP_HOST = (process.env.SMTP_HOST || "").trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
-const SMTP_SECURE = String(process.env.SMTP_SECURE ?? "true").toLowerCase() === "true";
+const SMTP_SECURE =
+  String(process.env.SMTP_SECURE ?? "true").toLowerCase() === "true";
 const SMTP_USER = (process.env.SMTP_USER || "").trim();
 const SMTP_PASS = process.env.SMTP_PASS || "";
 const SMTP_FROM = (process.env.SMTP_FROM || SMTP_USER).trim();
-const SMTP_FROM_NAME = (process.env.SMTP_FROM_NAME || "AI Client Hunter").trim();
+const SMTP_FROM_NAME = (
+  process.env.SMTP_FROM_NAME || "AI Client Hunter"
+).trim();
 const NOTIFY_EMAIL = (process.env.NOTIFY_EMAIL || SMTP_USER).trim();
 
 const BREVO_API_KEY = (process.env.BREVO_API_KEY || "").trim();
 const BREVO_FROM_EMAIL = (process.env.BREVO_FROM_EMAIL || "").trim();
-const BREVO_FROM_NAME = (process.env.BREVO_FROM_NAME || "AI Client Hunter").trim();
+const BREVO_FROM_NAME = (
+  process.env.BREVO_FROM_NAME || "AI Client Hunter"
+).trim();
 const BREVO_REPLY_TO = (process.env.BREVO_REPLY_TO || BREVO_FROM_EMAIL).trim();
-const BREVO_TIMEOUT_MS = Math.max(5000, Number(process.env.BREVO_TIMEOUT_MS || 15000));
+const BREVO_TIMEOUT_MS = Math.max(
+  5000,
+  Number(process.env.BREVO_TIMEOUT_MS || 15000)
+);
 
 const IMAP_HOST = (process.env.IMAP_HOST || "").trim();
 const IMAP_PORT = Number(process.env.IMAP_PORT || 993);
-const IMAP_SECURE = String(process.env.IMAP_SECURE ?? "true").toLowerCase() === "true";
+const IMAP_SECURE =
+  String(process.env.IMAP_SECURE ?? "true").toLowerCase() === "true";
 const IMAP_USER = (process.env.IMAP_USER || SMTP_USER).trim();
 const IMAP_PASS = process.env.IMAP_PASS || "";
 const REPLY_POLL_INTERVAL_MS = Math.max(
@@ -94,10 +134,10 @@ const supabaseAuthClient =
         auth: { autoRefreshToken: false, persistSession: false },
       })
     : SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
-      ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-          auth: { autoRefreshToken: false, persistSession: false },
-        })
-      : null;
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    : null;
 
 const supabaseAdmin =
   SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -119,7 +159,9 @@ function normalizeUrl(value) {
   const text = cleanString(value);
   if (!text) return "";
   try {
-    const url = /^https?:\/\//i.test(text) ? new URL(text) : new URL(`https://${text}`);
+    const url = /^https?:\/\//i.test(text)
+      ? new URL(text)
+      : new URL(`https://${text}`);
     return url.toString().replace(/\/$/, "");
   } catch {
     return "";
@@ -127,11 +169,11 @@ function normalizeUrl(value) {
 }
 
 function extractEmails(text) {
-  const matches = cleanString(text).match(
-    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi
-  ) || [];
-  return [...new Set(matches.map((e) => e.toLowerCase()))]
-    .filter((e) => !/\.(png|jpg|jpeg|webp|gif)$/i.test(e));
+  const matches =
+    cleanString(text).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  return [...new Set(matches.map((e) => e.toLowerCase()))].filter(
+    (e) => !/\.(png|jpg|jpeg|webp|gif)$/i.test(e)
+  );
 }
 
 function safeJsonParse(text) {
@@ -146,7 +188,9 @@ function safeJsonParse(text) {
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
     if (start >= 0 && end > start) {
-      try { return JSON.parse(cleaned.slice(start, end + 1)); } catch {}
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {}
     }
     return null;
   }
@@ -154,7 +198,11 @@ function safeJsonParse(text) {
 
 function geminiText(response) {
   if (typeof response?.text === "string") return response.text;
-  return response?.candidates?.[0]?.content?.parts?.map((p) => p?.text || "").join("") || "";
+  return (
+    response?.candidates?.[0]?.content?.parts
+      ?.map((p) => p?.text || "")
+      .join("") || ""
+  );
 }
 
 function leadStatus(score) {
@@ -196,48 +244,61 @@ function createUserDbClient(accessToken) {
 async function requireAuth(req, res, next) {
   try {
     if (!supabaseAuthClient) {
-      return res.status(503).json({ success: false, error: "Authentication service is not configured." });
+      return res
+        .status(503)
+        .json({
+          success: false,
+          error: "Authentication service is not configured.",
+        });
     }
     const header = cleanString(req.headers.authorization);
     const match = header.match(/^Bearer\s+(.+)$/i);
     if (!match) {
-      return res.status(401).json({ success: false, error: "Authentication required." });
+      return res
+        .status(401)
+        .json({ success: false, error: "Authentication required." });
     }
     const accessToken = cleanString(match[1]);
     const { data, error } = await supabaseAuthClient.auth.getUser(accessToken);
     if (error || !data?.user) {
-      return res.status(401).json({ success: false, error: "Invalid or expired session." });
+      return res
+        .status(401)
+        .json({ success: false, error: "Invalid or expired session." });
     }
     req.user = data.user;
     req.accessToken = accessToken;
     req.db = createUserDbClient(accessToken);
     if (!req.db) {
-      return res.status(503).json({ success: false, error: "Database service is not configured." });
+      return res
+        .status(503)
+        .json({ success: false, error: "Database service is not configured." });
     }
     next();
   } catch (error) {
     console.error("Auth error:", error?.message || error);
-    return res.status(401).json({ success: false, error: "Authentication failed." });
+    return res
+      .status(401)
+      .json({ success: false, error: "Authentication failed." });
   }
 }
 
 function errorStatus(error) {
   return Number(
     error?.status ||
-    error?.statusCode ||
-    error?.code ||
-    error?.response?.status ||
-    error?.response?.data?.error?.code ||
-    0
+      error?.statusCode ||
+      error?.code ||
+      error?.response?.status ||
+      error?.response?.data?.error?.code ||
+      0
   );
 }
 
 function errorMessage(error) {
   return cleanString(
     error?.message ||
-    error?.response?.data?.error?.message ||
-    error?.response?.data?.message ||
-    String(error || "")
+      error?.response?.data?.error?.message ||
+      error?.response?.data?.message ||
+      String(error || "")
   );
 }
 
@@ -267,7 +328,10 @@ function sleep(ms) {
 async function generateWithGemini(prompt, options = {}) {
   if (!ai) throw new Error("AI service is not configured.");
 
-  const maxRetries = Math.max(1, Number(options.maxRetries || GEMINI_MAX_RETRIES));
+  const maxRetries = Math.max(
+    1,
+    Number(options.maxRetries || GEMINI_MAX_RETRIES)
+  );
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
@@ -290,7 +354,9 @@ async function generateWithGemini(prompt, options = {}) {
 
       if (!retryable || attempt >= maxRetries) break;
 
-      const delay = GEMINI_RETRY_BASE_MS * (2 ** (attempt - 1)) + Math.floor(Math.random() * 700);
+      const delay =
+        GEMINI_RETRY_BASE_MS * 2 ** (attempt - 1) +
+        Math.floor(Math.random() * 700);
       console.log(`Gemini temporary failure; retrying in ${delay}ms...`);
       await sleep(delay);
     }
@@ -341,7 +407,9 @@ async function tavilySearch(query, maxResults = 8) {
 
       if (!response.ok) {
         const error = new Error(
-          data?.detail || data?.error || `Tavily search failed with HTTP ${response.status}.`
+          data?.detail ||
+            data?.error ||
+            `Tavily search failed with HTTP ${response.status}.`
         );
         error.status = response.status;
         throw error;
@@ -351,7 +419,12 @@ async function tavilySearch(query, maxResults = 8) {
     } catch (error) {
       lastError = error;
       const status = errorStatus(error);
-      const retryable = !status || status === 408 || status === 425 || status === 429 || status >= 500;
+      const retryable =
+        !status ||
+        status === 408 ||
+        status === 425 ||
+        status === 429 ||
+        status >= 500;
 
       console.error(
         `Tavily attempt ${attempt}/${TAVILY_MAX_RETRIES} failed for "${query}":`,
@@ -371,7 +444,9 @@ async function tavilySearch(query, maxResults = 8) {
 function uniqueSources(items) {
   const seen = new Set();
   return items.filter((item) => {
-    const key = cleanString(item?.url).toLowerCase() || cleanString(item?.title).toLowerCase();
+    const key =
+      cleanString(item?.url).toLowerCase() ||
+      cleanString(item?.title).toLowerCase();
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -396,7 +471,10 @@ async function discoverClients({ niche, location, service }) {
   for (let i = 0; i < batches.length; i += 1) {
     const result = batches[i];
     if (result.status === "rejected") {
-      console.error(`Tavily query ${i + 1} failed:`, errorMessage(result.reason));
+      console.error(
+        `Tavily query ${i + 1} failed:`,
+        errorMessage(result.reason)
+      );
       continue;
     }
 
@@ -435,7 +513,9 @@ function fallbackQualifyClients({ niche, location, service, sources }) {
 
       const officialSignals =
         Boolean(url) &&
-        !/(facebook|instagram|linkedin|youtube|yelp|tripadvisor|directory|yellowpages)/i.test(url);
+        !/(facebook|instagram|linkedin|youtube|yelp|tripadvisor|directory|yellowpages)/i.test(
+          url
+        );
 
       const contactSignals =
         Boolean(email) ||
@@ -458,13 +538,25 @@ function fallbackQualifyClients({ niche, location, service, sources }) {
       score = clamp(score, 0, 90);
 
       const reasonParts = [];
-      if (officialSignals) reasonParts.push("A business website was found in the live search evidence.");
-      if (email) reasonParts.push("A public contact email appears in the live search evidence.");
-      if (nicheMatch > 0) reasonParts.push("The live result contains terms related to the requested niche.");
-      if (!reasonParts.length) reasonParts.push("The business appeared in live search results.");
+      if (officialSignals)
+        reasonParts.push(
+          "A business website was found in the live search evidence."
+        );
+      if (email)
+        reasonParts.push(
+          "A public contact email appears in the live search evidence."
+        );
+      if (nicheMatch > 0)
+        reasonParts.push(
+          "The live result contains terms related to the requested niche."
+        );
+      if (!reasonParts.length)
+        reasonParts.push("The business appeared in live search results.");
 
       return {
-        businessName: title || url.replace(/^https?:\/\//, "").split("/")[0],
+        businessName:
+          cleanBusinessName(title) ||
+          url.replace(/^https?:\/\//, "").split("/")[0],
         industry: niche,
         location: location || "Unknown",
         website: url,
@@ -487,15 +579,19 @@ function fallbackQualifyClients({ niche, location, service, sources }) {
     .slice(0, AUTOPILOT_MAX_PROSPECTS);
 }
 
-async function qualifyClients({ niche, location, service, additionalInfo, sources }) {
-  const evidence = sources.map((source, i) => `
+async function qualifyClients({ niche, location, service, additionalInfo, sources, }) {
+  const evidence = sources
+    .map(
+      (source, i) => `
 SOURCE ${i + 1}
 TITLE: ${source.title}
 URL: ${source.url}
 EMAILS FOUND: ${source.emails.join(", ") || "none"}
 CONTENT:
 ${source.content.slice(0, 5000)}
-`).join("\n-------------------------\n");
+`
+    )
+    .join("\n-------------------------\n");
 
   const prompt = `
 You are the evidence-first qualification engine for an autonomous B2B client hunter.
@@ -547,38 +643,41 @@ ${evidence}
     const sourceUrlSet = new Set(sources.map((s) => s.url));
     const allEmails = new Set(sources.flatMap((s) => s.emails));
 
-    return parsed.prospects.map((item) => {
-      const score = clamp(item?.priorityScore, 0, 100);
-      const sourceUrls = Array.isArray(item?.sourceUrls)
-        ? item.sourceUrls.filter((url) => sourceUrlSet.has(normalizeUrl(url)))
-        : [];
-      const email = cleanString(item?.contactEmail).toLowerCase();
+    return parsed.prospects
+      .map((item) => {
+        const score = clamp(item?.priorityScore, 0, 100);
+        const sourceUrls = Array.isArray(item?.sourceUrls)
+          ? item.sourceUrls.filter((url) => sourceUrlSet.has(normalizeUrl(url)))
+          : [];
+        const email = cleanString(item?.contactEmail).toLowerCase();
 
-      return {
-        businessName: cleanString(item?.businessName),
-        industry: cleanString(item?.industry) || niche,
-        location: cleanString(item?.location) || location || "Unknown",
-        website: normalizeUrl(item?.website),
-        contactEmail: allEmails.has(email) ? email : "",
-        contactName: normalizePersonName(item?.contactName),
-        contactRole: cleanString(item?.contactRole),
-        likelyNeed: cleanString(item?.likelyNeed),
-        reason: cleanString(item?.reason),
-        suggestedService: cleanString(item?.suggestedService) || service,
-        outreachAngle: cleanString(item?.outreachAngle),
-        priorityScore: score,
-        status: leadStatus(score),
-        sourceUrls,
-      };
-    })
+        return {
+          businessName: cleanBusinessName(item?.businessName),
+          industry: cleanString(item?.industry) || niche,
+          location: cleanString(item?.location) || location || "Unknown",
+          website: normalizeUrl(item?.website),
+          contactEmail: allEmails.has(email) ? email : "",
+          contactName: normalizePersonName(item?.contactName),
+          contactRole: cleanString(item?.contactRole),
+          likelyNeed: cleanString(item?.likelyNeed),
+          reason: cleanString(item?.reason),
+          suggestedService: cleanString(item?.suggestedService) || service,
+          outreachAngle: cleanString(item?.outreachAngle),
+          priorityScore: score,
+          status: leadStatus(score),
+          sourceUrls,
+        };
+      })
       .filter((p) => p.businessName)
       .sort((a, b) => b.priorityScore - a.priorityScore)
       .slice(0, AUTOPILOT_MAX_PROSPECTS);
   } catch (error) {
-    console.warn("AI qualification unavailable; using evidence-based fallback:", errorMessage(error));
+    console.warn(
+      "AI qualification unavailable; using evidence-based fallback:",
+      errorMessage(error)
+    );
     return fallbackQualifyClients({ niche, location, service, sources });
   }
-
 }
 
 function smtpConfigured() {
@@ -597,7 +696,7 @@ function emailTransportConfigured() {
   return brevoConfigured() || (!brevoPartiallyConfigured() && smtpConfigured());
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = BREVO_TIMEOUT_MS) {
+async function fetchWithTimeout( url, options = {}, timeoutMs = BREVO_TIMEOUT_MS ) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -617,7 +716,9 @@ async function verifyBrevoTransport() {
     throw new Error("BREVO_API_KEY is missing on the backend Render service.");
   }
   if (!BREVO_FROM_EMAIL) {
-    throw new Error("BREVO_FROM_EMAIL is missing on the backend Render service.");
+    throw new Error(
+      "BREVO_FROM_EMAIL is missing on the backend Render service."
+    );
   }
 
   const response = await fetchWithTimeout("https://api.brevo.com/v3/account", {
@@ -643,7 +744,9 @@ async function verifyBrevoTransport() {
 
 async function verifySmtpTransport() {
   if (!smtpConfigured() || !transporter) {
-    throw new Error("SMTP is not configured. Check SMTP_HOST, SMTP_USER and SMTP_PASS.");
+    throw new Error(
+      "SMTP is not configured. Check SMTP_HOST, SMTP_USER and SMTP_PASS."
+    );
   }
   await transporter.verify();
   return true;
@@ -658,191 +761,54 @@ const transporter = smtpConfigured()
     })
   : null;
 
-function normalizePersonName(value) {
+function cleanBusinessName(value) {
+  let text = cleanString(value)
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+  if (!text) return "";
 
-  const text = cleanString(value).replace(/[\r\n]+/g, " ").trim();
+  // "Contact Information :: California Secretary of State" → "California Secretary of State"
+  if (text.includes("::")) {
+    text = text.split("::").pop().trim();
+  }
+  // "Something | Company Name" → "Company Name"
+  if (text.includes("|")) {
+    text = text.split("|").pop().trim();
+  }
+  // "Page Title - Company" / "Page Title – Company"
+  if (/\s[-–—]\s/.test(text)) {
+    const parts = text.split(/\s[-–—]\s/);
+    text = (parts[parts.length - 1] || text).trim();
+  }
+
+  // Remove common page-title / section prefixes
+  text = text
+    .replace(
+      /^(contact information|contact us|about us|about|home|homepage|official (site|website)|welcome to)\s*[-–:|]?\s*/i,
+      ""
+    )
+    .trim();
+
+  return text || cleanString(value);
+}
+
+function normalizePersonName(value) {
+  const text = cleanString(value)
+    .replace(/[\r\n]+/g, " ")
+    .trim();
   if (!text || /^(unknown|not known|n\/a|none|null)$/i.test(text)) return "";
   if (text.length > 80) return "";
-  return text;
-}
-
-function safeHeaderName(value, fallback) {
-  const text = cleanString(value).replace(/[\r\n]+/g, " ").trim();
-  return text.slice(0, 120) || fallback;
-}
-
-function formatSenderAddress(sender = {}) {
-  const address = SMTP_FROM || SMTP_USER;
-  const name = safeHeaderName(
-    sender.company || sender.name || SMTP_FROM_NAME,
-    "AI Client Hunter"
-  );
-  return { name, address };
-}
-
-function parseEmailAddress(value) {
-  const raw = cleanString(value);
-  const match = raw.match(/<([^<>@\s]+@[^<>@\s]+)>/);
-  return (match?.[1] || raw).trim();
-}
-
-async function sendViaBrevo({ to, subject, text, replyTo, senderName, senderCompany, notification = false }) {
-  if (!brevoConfigured()) {
-    throw new Error("Brevo is not configured. Add BREVO_API_KEY and verify BREVO_FROM_EMAIL.");
+  // Reject page titles / section headers used as person names
+  if (
+    /::|\||contact information|about us|home\s*page|official website|secretary of state/i.test(
+      text
+    )
+  ) {
+    return "";
   }
-
-  const displayName = safeHeaderName(
-    notification
-      ? BREVO_FROM_NAME
-      : senderCompany || senderName || BREVO_FROM_NAME,
-    "AI Client Hunter"
-  );
-
-  const payload = {
-    sender: {
-      name: displayName,
-      email: BREVO_FROM_EMAIL,
-    },
-    to: [{ email: to }],
-    subject,
-    textContent: text,
-  };
-
-  const effectiveReplyTo = cleanString(replyTo) || BREVO_REPLY_TO || BREVO_FROM_EMAIL;
-  if (effectiveReplyTo) {
-    payload.replyTo = {
-      email: parseEmailAddress(effectiveReplyTo),
-    };
-  }
-
-  const response = await fetchWithTimeout("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "api-key": BREVO_API_KEY,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const detail =
-      data?.message ||
-      data?.code ||
-      `Brevo email failed with HTTP ${response.status}.`;
-    throw new Error(detail);
-  }
-
-  return {
-    messageId: cleanString(data?.messageId),
-    provider: "brevo",
-    raw: data,
-  };
-}
-
-async function sendEmail({ to, subject, text, replyTo, senderName, senderCompany, notification = false }) {
-  // Brevo uses HTTPS, so it works from Render Free where SMTP egress is blocked.
-  if (brevoPartiallyConfigured()) {
-    if (!brevoConfigured()) {
-      throw new Error("Brevo is partially configured. Both BREVO_API_KEY and BREVO_FROM_EMAIL are required.");
-    }
-    return sendViaBrevo({
-      to,
-      subject,
-      text,
-      replyTo: replyTo || BREVO_REPLY_TO || NOTIFY_EMAIL,
-      senderName,
-      senderCompany,
-      notification,
-    });
-  }
-
-  if (!transporter) {
-    throw new Error(
-      "No email transport is available. On Render Free, SMTP is blocked; configure Brevo HTTPS email with BREVO_API_KEY and BREVO_FROM_EMAIL."
-    );
-  }
-
-  const from = notification
-    ? { name: safeHeaderName(SMTP_FROM_NAME, "AI Client Hunter"), address: SMTP_FROM || SMTP_USER }
-    : formatSenderAddress({ name: senderName, company: senderCompany });
-
-  return transporter.sendMail({
-    from,
-    to,
-    subject,
-    text,
-    replyTo: replyTo || SMTP_FROM || SMTP_USER,
-  });
-}
-
-function fallbackOutreachText(lead, sender = {}) {
-  const businessName = cleanString(lead.businessName) || "your team";
-  const recipientName = normalizePersonName(lead.contactName);
-  const senderName = cleanString(sender.name);
-  const senderCompany = cleanString(sender.company);
-  const service = cleanString(lead.suggestedService) || "our service";
-
-  const greeting = recipientName
-    ? `Hi ${recipientName},`
-    : `Hi ${businessName} team,`;
-
-  const senderLine = senderCompany
-    ? `I work with ${senderCompany} on ${service}.`
-    : senderName
-      ? `I’m ${senderName}, and I work on ${service}.`
-      : `I work on ${service}.`;
-
-  const subject = `Quick idea for ${businessName}`;
-
-  const body = [
-    greeting,
-    "",
-    `I came across ${businessName} while researching ${lead.industry || "businesses"} in ${lead.location || "your area"}.`,
-    "",
-    `${senderLine} I had a quick idea that may be relevant to your team based on the public information available about the business.`,
-    "",
-    "If this is something you’re exploring, I can send a short example and a few details.",
-    "",
-    "Best,",
-    senderName || "AI Client Hunter",
-    ...(senderCompany ? [senderCompany] : []),
-  ].join("\n");
-
-  return `Subject: ${subject}\nEmail:\n${body}`;
-}
-
-async function generateOutreachText(lead, sender = {}) {
-  const senderName = cleanString(sender.name);
-  const senderCompany = cleanString(sender.company);
-  const recipientName = normalizePersonName(lead.contactName);
-
-  const prompt = `
-Write a concise, natural first B2B sales email to the PROSPECT below.
-
-PROSPECT / RECIPIENT
-Business: ${lead.businessName}
-Recipient person name: ${recipientName || "No reliable person name found"}
-Recipient role: ${cleanString(lead.contactRole) || "Unknown"}
-Industry: ${lead.industry || "Unknown"}
-Location: ${lead.location || "Unknown"}
-Website: ${lead.website || "Unknown"}
-Public contact email: ${lead.contactEmail || "Unknown"}
-Likely need: ${lead.likelyNeed || "Unknown"}
-Evidence / reason: ${lead.reason || "Unknown"}
-Outreach angle: ${lead.outreachAngle || "Unknown"}
-
-SENDER / OUR BUSINESS
-Sender name: ${senderName || "Not provided"}
-Sender company: ${senderCompany || "Not provided"}
-Service offered: ${lead.suggestedService || "Professional service"}
-
-Rules:
-- You are writing TO the prospect, never to the sender.
-- The greeting MUST use the prospect person's name only if a reliable recipient person name is supplied.
-- If no reliable person name is supplied, greet the business naturally as: "Hi ${cleanString(lead.businessName) || "Business"} team,".
+  // Prefer real person-looking names (letters, limited length)
+  if (!/^[A-Za-z][A-Za-z.'\- ]{0,60}$/.test(text)) return ""; const words = text.split(/\s+/).filter(Boolean); if (words.length < 1 || words.length > 4) return ""; return text; } function safeHeaderName(value, fallback) { const text = cleanString(value) .replace(/[\r\n]+/g, " ") .trim(); return text.slice(0, 120) || fallback; } function formatSenderAddress(sender = {}) { const address = SMTP_FROM || SMTP_USER; const name = safeHeaderName( sender.company || sender.name || SMTP_FROM_NAME, "AI Client Hunter" ); return { name, address }; } function parseEmailAddress(value) { const raw = cleanString(value); const match = raw.match(/<([^<>@\s]+@[^<>@\s]+)>/); return (match?.[1] || raw).trim(); } async function sendViaBrevo({ to, subject, text, replyTo, senderName, senderCompany, notification = false, }) { if (!brevoConfigured()) { throw new Error( "Brevo is not configured. Add BREVO_API_KEY and verify BREVO_FROM_EMAIL." ); } const displayName = safeHeaderName( notification ? BREVO_FROM_NAME : senderCompany || senderName || BREVO_FROM_NAME, "AI Client Hunter" ); const payload = { sender: { name: displayName, email: BREVO_FROM_EMAIL, }, to: [{ email: to }], subject, textContent: text, }; const effectiveReplyTo = cleanString(replyTo) || BREVO_REPLY_TO || BREVO_FROM_EMAIL; if (effectiveReplyTo) { payload.replyTo = { email: parseEmailAddress(effectiveReplyTo), }; } const response = await fetchWithTimeout( "https://api.brevo.com/v3/smtp/email", { method: "POST", headers: { "api-key": BREVO_API_KEY, "Content-Type": "application/json", Accept: "application/json", }, body: JSON.stringify(payload), } ); const data = await response.json().catch(() => ({})); if (!response.ok) { const detail = data?.message || data?.code || `Brevo email failed with HTTP ${response.status}.`; throw new Error(detail); } return { messageId: cleanString(data?.messageId), provider: "brevo", raw: data, }; } async function sendEmail({ to, subject, text, replyTo, senderName, senderCompany, notification = false, }) { // Brevo uses HTTPS, so it works from Render Free where SMTP egress is blocked. if (brevoPartiallyConfigured()) { if (!brevoConfigured()) { throw new Error( "Brevo is partially configured. Both BREVO_API_KEY and BREVO_FROM_EMAIL are required." ); } return sendViaBrevo({ to, subject, text, replyTo: replyTo || BREVO_REPLY_TO || NOTIFY_EMAIL, senderName, senderCompany, notification, }); } if (!transporter) { throw new Error( "No email transport is available. On Render Free, SMTP is blocked; configure Brevo HTTPS email with BREVO_API_KEY and BREVO_FROM_EMAIL." ); } const from = notification ? { name: safeHeaderName(SMTP_FROM_NAME, "AI Client Hunter"), address: SMTP_FROM || SMTP_USER, } : formatSenderAddress({ name: senderName, company: senderCompany }); return transporter.sendMail({ from, to, subject, text, replyTo: replyTo || SMTP_FROM || SMTP_USER, }); } function fallbackOutreachText(lead, sender = {}) { const businessName = cleanBusinessName(lead.businessName) || "your team"; const recipientName = normalizePersonName(lead.contactName); const senderName = cleanString(sender.name); const senderCompany = cleanString(sender.company); const service = cleanString(lead.suggestedService) || "our service"; const greeting = recipientName ? `Hi ${recipientName},` : `Hi ${businessName} team,`; const senderLine = senderCompany ? `I work with ${senderCompany} on ${service}.` : senderName ? `I’m ${senderName}, and I work on ${service}.` : `I work on ${service}.`; const subject = `Quick idea for ${businessName}`; const body = [ greeting, "", `I came across ${businessName} while researching ${ lead.industry || "businesses" } in ${lead.location || "your area"}.`, "", `${senderLine} I had a quick idea that may be relevant to your team based on the public information available about the business.`, "", "If this is something you’re exploring, I can send a short example and a few details.", "", "Best,", senderName || "AI Client Hunter", ...(senderCompany ? [senderCompany] : []), ].join("\n"); return `Subject: ${subject}\nEmail:\n${body}`; } async function generateOutreachText(lead, sender = {}) { const senderName = cleanString(sender.name); const senderCompany = cleanString(sender.company); const recipientName = normalizePersonName(lead.contactName); const businessName = cleanBusinessName(lead.businessName) || "Business"; const prompt = ` Write a concise, natural first B2B sales email to the PROSPECT below. PROSPECT / RECIPIENT Business: ${businessName} Recipient person name: ${recipientName || "No reliable person name found"} Recipient role: ${cleanString(lead.contactRole) || "Unknown"} Industry: ${lead.industry || "Unknown"} Location: ${lead.location || "Unknown"} Website: ${lead.website || "Unknown"} Public contact email: ${lead.contactEmail || "Unknown"} Likely need: ${lead.likelyNeed || "Unknown"} Evidence / reason: ${lead.reason || "Unknown"} Outreach angle: ${lead.outreachAngle || "Unknown"} SENDER / OUR BUSINESS Sender name: ${senderName || "Not provided"} Sender company: ${senderCompany || "Not provided"} Service offered: ${lead.suggestedService || "Professional service"} Rules: - You are writing TO the prospect, never to the sender. - The greeting MUST use the prospect person's name only if a reliable recipient person name is supplied.
+- If no reliable person name is supplied, greet the business naturally as: "Hi ${businessName} team,".
 - NEVER greet the sender by mistake. Never use the sender name as the recipient name.
 - The sender identity belongs in the signature and/or a brief sender-introduction sentence.
 - Keep the prospect's business name correct and natural.
@@ -871,18 +837,25 @@ Email:
   }
 }
 
-
 async function saveLeadForUser(db, userId, prospect, notes = "") {
   const website = normalizeUrl(prospect.website);
-  let duplicateQuery = db.from("leads").select("*").eq("user_id", userId).limit(1);
+  let duplicateQuery = db
+    .from("leads")
+    .select("*")
+    .eq("user_id", userId)
+    .limit(1);
   if (website) {
     duplicateQuery = duplicateQuery.eq("website", website);
   } else {
-    duplicateQuery = duplicateQuery.ilike("business_name", prospect.businessName);
+    duplicateQuery = duplicateQuery.ilike(
+      "business_name",
+      prospect.businessName
+    );
   }
   const { data: duplicate, error: duplicateError } = await duplicateQuery;
   if (duplicateError) throw duplicateError;
-  if (duplicate?.length) return { duplicate: true, lead: apiLead(duplicate[0]) };
+  if (duplicate?.length)
+    return { duplicate: true, lead: apiLead(duplicate[0]) };
 
   const payload = {
     user_id: userId,
@@ -897,10 +870,16 @@ async function saveLeadForUser(db, userId, prospect, notes = "") {
     outreach_angle: cleanString(prospect.outreachAngle),
     priority_score: clamp(prospect.priorityScore, 0, 100),
     status: leadStatus(prospect.priorityScore),
-    notes: notes || (prospect.contactEmail ? `Contact email: ${prospect.contactEmail}` : ""),
+    notes:
+      notes ||
+      (prospect.contactEmail ? `Contact email: ${prospect.contactEmail}` : ""),
   };
 
-  const { data, error } = await db.from("leads").insert(payload).select("*").single();
+  const { data, error } = await db
+    .from("leads")
+    .insert(payload)
+    .select("*")
+    .single();
   if (error) throw error;
   return { duplicate: false, lead: apiLead(data) };
 }
@@ -911,7 +890,9 @@ async function saveLeadForUser(db, userId, prospect, notes = "") {
 const autopilotJobs = new Map();
 let replyPollRunning = false;
 
-function jobKey(userId) { return userId; }
+function jobKey(userId) {
+  return userId;
+}
 
 function backgroundDb() {
   return supabaseAdmin;
@@ -953,7 +934,9 @@ async function persistAutopilotJob(job) {
 
 async function loadPersistedAutopilotJobs() {
   if (!supabaseAdmin) {
-    console.warn("Persistent autopilot disabled: SUPABASE_SERVICE_ROLE_KEY is missing.");
+    console.warn(
+      "Persistent autopilot disabled: SUPABASE_SERVICE_ROLE_KEY is missing."
+    );
     return [];
   }
 
@@ -964,7 +947,9 @@ async function loadPersistedAutopilotJobs() {
 
   if (error) {
     console.warn(
-      `Could not restore autopilot jobs. Run the cloud migration first. ${error.message || error}`
+      `Could not restore autopilot jobs. Run the cloud migration first. ${
+        error.message || error
+      }`
     );
     return [];
   }
@@ -1001,11 +986,15 @@ async function contactedRecently(db, userId, leadId, recipientEmail) {
       .from("outreach_log")
       .select("id")
       .eq("user_id", userId)
-      .gte("sent_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .gte(
+        "sent_at",
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      )
       .limit(1);
 
     if (leadId) query = query.eq("lead_id", leadId);
-    if (recipientEmail) query = query.eq("recipient_email", recipientEmail.toLowerCase());
+    if (recipientEmail)
+      query = query.eq("recipient_email", recipientEmail.toLowerCase());
 
     const { data, error } = await query;
     if (error) {
@@ -1023,7 +1012,8 @@ async function contactedRecently(db, userId, leadId, recipientEmail) {
 async function logOutreach(db, payload) {
   try {
     const { error } = await db.from("outreach_log").insert(payload);
-    if (error) console.warn("Outreach log insert failed:", error.message || error);
+    if (error)
+      console.warn("Outreach log insert failed:", error.message || error);
   } catch (error) {
     console.warn("Outreach log failed:", errorMessage(error));
   }
@@ -1054,7 +1044,11 @@ async function runAutopilotJob(job) {
         emailErrors: [],
         leadErrors: [],
         smtpVerified: Boolean(smtpConfigured() && !brevoConfigured()),
-        provider: brevoConfigured() ? "brevo" : smtpConfigured() ? "smtp" : "none",
+        provider: brevoConfigured()
+          ? "brevo"
+          : smtpConfigured()
+          ? "smtp"
+          : "none",
         message: "No usable live web results were found.",
       };
       return { success: true, ...job.lastResult };
@@ -1110,7 +1104,8 @@ async function runAutopilotJob(job) {
         if (!savedResult.duplicate) saved += 1;
       } catch (error) {
         leadSaveFailures += 1;
-        const detail = errorMessage(error) || "Unknown database lead-save error.";
+        const detail =
+          errorMessage(error) || "Unknown database lead-save error.";
         leadErrors.push(`${prospect.businessName}: ${detail}`);
 
         console.error(
@@ -1125,7 +1120,10 @@ async function runAutopilotJob(job) {
         };
       }
 
-      if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+      if (
+        !recipientEmail ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)
+      ) {
         skippedNoEmail += 1;
         continue;
       }
@@ -1220,7 +1218,9 @@ async function runAutopilotJob(job) {
                 outreach_subject: subject,
                 outreach_body: body,
                 last_contacted_at: now,
-                notes: `${savedResult.lead.notes || ""}\nAutopilot email sent via ${
+                notes: `${
+                  savedResult.lead.notes || ""
+                }\nAutopilot email sent via ${
                   mailResult?.provider || "email"
                 }: ${now}`.trim(),
                 updated_at: now,
@@ -1261,9 +1261,9 @@ async function runAutopilotJob(job) {
         }
 
         console.log(
-          `Autopilot email accepted by ${
-            mailResult?.provider || "email"
-          } for ${prospect.businessName} <${recipientEmail}>`
+          `Autopilot email accepted by ${mailResult?.provider || "email"} for ${
+            prospect.businessName
+          } <${recipientEmail}>`
         );
       } catch (error) {
         emailFailures += 1;
@@ -1299,8 +1299,8 @@ async function runAutopilotJob(job) {
       provider: brevoConfigured()
         ? "brevo"
         : smtpConfigured()
-          ? "smtp"
-          : "none",
+        ? "smtp"
+        : "none",
       fallbackQualification: false,
     };
 
@@ -1318,10 +1318,14 @@ async function runAutopilotJob(job) {
       ...job.lastResult,
       message:
         emailed > 0
-          ? `Hunter found ${strong.length} strong prospects and sent ${emailed} public-email outreach message(s) using ${
+          ? `Hunter found ${
+              strong.length
+            } strong prospects and sent ${emailed} public-email outreach message(s) using ${
               brevoConfigured() ? "Brevo" : "SMTP"
             }.${dbSuffix}`
-          : `Hunter found ${strong.length} strong prospects, but sent 0 emails. Recent=${skippedRecent}, no-email=${skippedNoEmail}, daily-limit=${skippedEmailLimit}, send-failures=${emailFailures}, CRM-save-failures=${leadSaveFailures}${
+          : `Hunter found ${
+              strong.length
+            } strong prospects, but sent 0 emails. Recent=${skippedRecent}, no-email=${skippedNoEmail}, daily-limit=${skippedEmailLimit}, send-failures=${emailFailures}, CRM-save-failures=${leadSaveFailures}${
               emailErrors.length
                 ? `. Email errors: ${emailErrors.slice(0, 2).join(" | ")}`
                 : ""
@@ -1451,7 +1455,10 @@ async function pollReplies() {
         }
 
         const subject = cleanString(parsed.subject, "(no subject)");
-        const text = cleanString(parsed.text || parsed.html || "").slice(0, 12000);
+        const text = cleanString(parsed.text || parsed.html || "").slice(
+          0,
+          12000
+        );
         const messageId =
           cleanString(parsed.messageId) ||
           cleanString(message?.envelope?.messageId);
@@ -1543,11 +1550,10 @@ Rules:
           .from("leads")
           .update({
             status: interested ? "Replied" : lead.status,
-            notes:
-              `${lead.notes || ""}\nReply received ${now}: ${cleanString(
-                classification?.summary,
-                "Reply received."
-              )}`.trim(),
+            notes: `${lead.notes || ""}\nReply received ${now}: ${cleanString(
+              classification?.summary,
+              "Reply received."
+            )}`.trim(),
             updated_at: now,
           })
           .eq("id", lead.id)
@@ -1574,8 +1580,7 @@ Rules:
             to: NOTIFY_EMAIL,
             subject: `🔥 Interested lead reply: ${lead.business_name}`,
             notification: true,
-            text:
-`AI Client Hunter detected an interested prospect reply.
+            text: `AI Client Hunter detected an interested prospect reply.
 
 Business: ${lead.business_name}
 From: ${fromEmail}
@@ -1612,26 +1617,28 @@ ${text}`,
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
-app.use(cors({
-  origin(origin, callback) {
-    // Server-to-server requests have no Origin header.
-    if (!origin) return callback(null, true);
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Server-to-server requests have no Origin header.
+      if (!origin) return callback(null, true);
 
-    const normalizedOrigin = origin.trim().replace(/\/$/, "");
-    if (ALLOWED_CORS_ORIGINS.has(normalizedOrigin)) {
-      return callback(null, true);
-    }
+      const normalizedOrigin = origin.trim().replace(/\/$/, "");
+      if (ALLOWED_CORS_ORIGINS.has(normalizedOrigin)) {
+        return callback(null, true);
+      }
 
-    console.warn(`CORS blocked origin: ${origin}`);
-    // Returning false avoids throwing a CORS error through Express while
-    // still refusing to grant the browser access-control headers.
-    return callback(null, false);
-  },
-  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: false,
-  optionsSuccessStatus: 204,
-}));
+      console.warn(`CORS blocked origin: ${origin}`);
+      // Returning false avoids throwing a CORS error through Express while
+      // still refusing to grant the browser access-control headers.
+      return callback(null, false);
+    },
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
+    optionsSuccessStatus: 204,
+  })
+);
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
@@ -1640,63 +1647,79 @@ const apiLimiter = rateLimit({
   limit: RATE_LIMIT_MAX,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: { success: false, error: "Too many requests. Please try again later." },
+  message: {
+    success: false,
+    error: "Too many requests. Please try again later.",
+  },
 });
 const aiLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
   limit: AI_RATE_LIMIT_MAX,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: { success: false, error: "AI usage limit reached. Please try again later." },
+  message: {
+    success: false,
+    error: "AI usage limit reached. Please try again later.",
+  },
 });
 app.use("/api", apiLimiter);
 
-app.get("/", (req, res) => res.json({ success: true, message: "AI Client Hunter API is running", version: "11.0.0-brevo-first-diagnostics" }));
-app.get("/api/health", (req, res) => res.json({
-  success: true,
-  status: "healthy",
-  timestamp: new Date().toISOString(),
-  services: {
-    gemini: Boolean(GEMINI_API_KEY),
-    tavily: Boolean(TAVILY_API_KEY),
-    supabase: Boolean(supabaseAuthClient),
-    smtp: emailTransportConfigured(),
-    brevo: brevoConfigured(),
-    brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
-    brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
-    imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
-    smtpAccount: SMTP_USER || null,
+app.get("/", (req, res) =>
+  res.json({
+    success: true,
+    message: "AI Client Hunter API is running",
+    version: "11.0.0-brevo-first-diagnostics",
+  })
+);
+app.get("/api/health", (req, res) =>
+  res.json({
+    success: true,
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    services: {
+      gemini: Boolean(GEMINI_API_KEY),
+      tavily: Boolean(TAVILY_API_KEY),
+      supabase: Boolean(supabaseAuthClient),
+      smtp: emailTransportConfigured(),
+      brevo: brevoConfigured(),
+      brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
+      brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
+      imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
+      smtpAccount: SMTP_USER || null,
+      smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
+      brevoFromEmail: BREVO_FROM_EMAIL || null,
+      autopilot: true,
+      persistentAutopilot: Boolean(supabaseAdmin),
+      persistentReplyMonitor: Boolean(supabaseAdmin),
+    },
+    model: GEMINI_MODEL,
+    environment: NODE_ENV,
+  })
+);
+app.get("/api/config-status", (req, res) =>
+  res.json({
+    success: true,
+    services: {
+      gemini: Boolean(GEMINI_API_KEY),
+      tavily: Boolean(TAVILY_API_KEY),
+      supabase: Boolean(supabaseAuthClient),
+      smtp: emailTransportConfigured(),
+      brevo: brevoConfigured(),
+      brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
+      brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
+      imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
+      persistentAutopilot: Boolean(supabaseAdmin),
+      persistentReplyMonitor: Boolean(supabaseAdmin),
+    },
+    autopilotIntervalMinutes: AUTOPILOT_INTERVAL_MINUTES,
+    autopilotMinScore: AUTOPILOT_MIN_SCORE,
+    model: GEMINI_MODEL,
     smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
     brevoFromEmail: BREVO_FROM_EMAIL || null,
-    autopilot: true,
-    persistentAutopilot: Boolean(supabaseAdmin),
-    persistentReplyMonitor: Boolean(supabaseAdmin),
-  },
-  model: GEMINI_MODEL,
-  environment: NODE_ENV,
-}));
-app.get("/api/config-status", (req, res) => res.json({
-  success: true,
-  services: {
-    gemini: Boolean(GEMINI_API_KEY),
-    tavily: Boolean(TAVILY_API_KEY),
-    supabase: Boolean(supabaseAuthClient),
-    smtp: emailTransportConfigured(),
-    brevo: brevoConfigured(),
     brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
     brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
-    imap: Boolean(IMAP_HOST && IMAP_USER && IMAP_PASS),
-    persistentAutopilot: Boolean(supabaseAdmin),
-    persistentReplyMonitor: Boolean(supabaseAdmin),
-  },
-  autopilotIntervalMinutes: AUTOPILOT_INTERVAL_MINUTES,
-  autopilotMinScore: AUTOPILOT_MIN_SCORE,
-  model: GEMINI_MODEL,
-  smtpFromName: SMTP_FROM_NAME || "AI Client Hunter",
-  brevoFromEmail: BREVO_FROM_EMAIL || null,
-  brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
-  brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
-}));
+  })
+);
 app.get("/api/notifications", requireAuth, async (req, res) => {
   try {
     const { data, error } = await req.db
@@ -1738,19 +1761,26 @@ app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/me", requireAuth, (req, res) => res.json({
-  success: true,
-  user: { id: req.user.id, email: req.user.email || null },
-}));
+app.get("/api/me", requireAuth, (req, res) =>
+  res.json({
+    success: true,
+    user: { id: req.user.id, email: req.user.email || null },
+  })
+);
 
 app.post("/api/generate", requireAuth, aiLimiter, async (req, res) => {
   try {
     const prompt = cleanString(req.body?.prompt);
-    if (!prompt) return res.status(400).json({ success: false, error: "Prompt is required." });
+    if (!prompt)
+      return res
+        .status(400)
+        .json({ success: false, error: "Prompt is required." });
     return res.json({ success: true, text: await generateWithGemini(prompt) });
   } catch (error) {
     console.error("Generate error:", error?.message || error);
-    return res.status(500).json({ success: false, error: "AI request failed." });
+    return res
+      .status(500)
+      .json({ success: false, error: "AI request failed." });
   }
 });
 
@@ -1762,12 +1792,27 @@ app.post("/api/hunt", requireAuth, aiLimiter, async (req, res) => {
     const additionalInfo = cleanString(req.body?.additionalInfo);
     const senderName = cleanString(req.body?.senderName);
     const senderCompany = cleanString(req.body?.senderCompany);
-    if (!niche) return res.status(400).json({ success: false, error: "Niche is required." });
+    if (!niche)
+      return res
+        .status(400)
+        .json({ success: false, error: "Niche is required." });
 
     const sources = await discoverClients({ niche, location, service });
-    if (!sources.length) return res.json({ success: true, prospects: [], sources: [], sourceCount: 0 });
+    if (!sources.length)
+      return res.json({
+        success: true,
+        prospects: [],
+        sources: [],
+        sourceCount: 0,
+      });
 
-    const prospects = await qualifyClients({ niche, location, service, additionalInfo, sources });
+    const prospects = await qualifyClients({
+      niche,
+      location,
+      service,
+      additionalInfo,
+      sources,
+    });
     res.json({
       success: true,
       prospects,
@@ -1782,7 +1827,11 @@ app.post("/api/hunt", requireAuth, aiLimiter, async (req, res) => {
 
 app.get("/api/leads", requireAuth, async (req, res) => {
   try {
-    const { data, error } = await req.db.from("leads").select("*").eq("user_id", req.user.id).order("created_at", { ascending: false });
+    const { data, error } = await req.db
+      .from("leads")
+      .select("*")
+      .eq("user_id", req.user.id)
+      .order("created_at", { ascending: false });
     if (error) throw error;
     res.json({ success: true, leads: (data || []).map(apiLead) });
   } catch (error) {
@@ -1794,9 +1843,19 @@ app.get("/api/leads", requireAuth, async (req, res) => {
 app.post("/api/leads", requireAuth, async (req, res) => {
   try {
     const prospect = req.body || {};
-    if (!cleanString(prospect.businessName)) return res.status(400).json({ success: false, error: "Business name is required." });
+    if (!cleanString(prospect.businessName))
+      return res
+        .status(400)
+        .json({ success: false, error: "Business name is required." });
     const result = await saveLeadForUser(req.db, req.user.id, prospect);
-    if (result.duplicate) return res.status(409).json({ success: false, duplicate: true, error: "This lead is already saved." });
+    if (result.duplicate)
+      return res
+        .status(409)
+        .json({
+          success: false,
+          duplicate: true,
+          error: "This lead is already saved.",
+        });
     res.status(201).json({ success: true, lead: result.lead });
   } catch (error) {
     console.error("Save lead:", error?.message || error);
@@ -1808,13 +1867,31 @@ app.patch("/api/leads/:id", requireAuth, async (req, res) => {
   try {
     const id = cleanString(req.params.id);
     const updates = { updated_at: new Date().toISOString() };
-    if (typeof req.body?.notes === "string") updates.notes = req.body.notes.trim();
+    if (typeof req.body?.notes === "string")
+      updates.notes = req.body.notes.trim();
     if (typeof req.body?.status === "string") {
-      const allowed = ["Hot", "Warm", "Cold", "Contacted", "Replied", "Won", "Lost"];
-      if (!allowed.includes(req.body.status)) return res.status(400).json({ success: false, error: "Invalid status." });
+      const allowed = [
+        "Hot",
+        "Warm",
+        "Cold",
+        "Contacted",
+        "Replied",
+        "Won",
+        "Lost",
+      ];
+      if (!allowed.includes(req.body.status))
+        return res
+          .status(400)
+          .json({ success: false, error: "Invalid status." });
       updates.status = req.body.status;
     }
-    const { data, error } = await req.db.from("leads").update(updates).eq("id", id).eq("user_id", req.user.id).select("*").single();
+    const { data, error } = await req.db
+      .from("leads")
+      .update(updates)
+      .eq("id", id)
+      .eq("user_id", req.user.id)
+      .select("*")
+      .single();
     if (error) throw error;
     res.json({ success: true, lead: apiLead(data) });
   } catch (error) {
@@ -1825,7 +1902,11 @@ app.patch("/api/leads/:id", requireAuth, async (req, res) => {
 
 app.delete("/api/leads/:id", requireAuth, async (req, res) => {
   try {
-    const { error } = await req.db.from("leads").delete().eq("id", cleanString(req.params.id)).eq("user_id", req.user.id);
+    const { error } = await req.db
+      .from("leads")
+      .delete()
+      .eq("id", cleanString(req.params.id))
+      .eq("user_id", req.user.id);
     if (error) throw error;
     res.json({ success: true });
   } catch (error) {
@@ -1842,10 +1923,14 @@ app.post("/api/outreach", requireAuth, aiLimiter, async (req, res) => {
     const senderCompany = cleanString(req.body?.senderCompany);
 
     if (!["Email", "WhatsApp", "LinkedIn"].includes(channel)) {
-      return res.status(400).json({ success: false, error: "Invalid outreach channel." });
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid outreach channel." });
     }
     if (!cleanString(lead.businessName)) {
-      return res.status(400).json({ success: false, error: "Lead information is required." });
+      return res
+        .status(400)
+        .json({ success: false, error: "Lead information is required." });
     }
 
     if (channel === "Email") {
@@ -1864,7 +1949,9 @@ app.post("/api/outreach", requireAuth, aiLimiter, async (req, res) => {
 Write a personalized ${channel} outreach message TO this prospect.
 
 Prospect business: ${lead.businessName}
-Recipient name: ${normalizePersonName(lead.contactName) || "No reliable person name found"}
+Recipient name: ${
+      normalizePersonName(lead.contactName) || "No reliable person name found"
+    }
 Industry: ${lead.industry || "Unknown"}
 Location: ${lead.location || "Unknown"}
 Website: ${lead.website || "Unknown"}
@@ -1886,7 +1973,9 @@ Rules:
     res.json({ success: true, channel, text });
   } catch (error) {
     console.error("Outreach:", errorMessage(error));
-    res.status(500).json({ success: false, error: "Outreach generation failed." });
+    res
+      .status(500)
+      .json({ success: false, error: "Outreach generation failed." });
   }
 });
 
@@ -1905,11 +1994,7 @@ app.get("/api/autopilot/status", requireAuth, async (req, res) => {
         minScore: AUTOPILOT_MIN_SCORE,
         emailReady: emailTransportConfigured(),
         replyMonitorReady: Boolean(
-          IMAP_HOST &&
-          IMAP_USER &&
-          IMAP_PASS &&
-          NOTIFY_EMAIL &&
-          supabaseAdmin
+          IMAP_HOST && IMAP_USER && IMAP_PASS && NOTIFY_EMAIL && supabaseAdmin
         ),
         persistent: Boolean(supabaseAdmin),
       });
@@ -1934,11 +2019,7 @@ app.get("/api/autopilot/status", requireAuth, async (req, res) => {
           minScore: AUTOPILOT_MIN_SCORE,
           emailReady: emailTransportConfigured(),
           replyMonitorReady: Boolean(
-            IMAP_HOST &&
-            IMAP_USER &&
-            IMAP_PASS &&
-            NOTIFY_EMAIL &&
-            supabaseAdmin
+            IMAP_HOST && IMAP_USER && IMAP_PASS && NOTIFY_EMAIL && supabaseAdmin
           ),
           persistent: true,
         });
@@ -1955,11 +2036,7 @@ app.get("/api/autopilot/status", requireAuth, async (req, res) => {
       minScore: AUTOPILOT_MIN_SCORE,
       emailReady: emailTransportConfigured(),
       replyMonitorReady: Boolean(
-        IMAP_HOST &&
-        IMAP_USER &&
-        IMAP_PASS &&
-        NOTIFY_EMAIL &&
-        supabaseAdmin
+        IMAP_HOST && IMAP_USER && IMAP_PASS && NOTIFY_EMAIL && supabaseAdmin
       ),
       persistent: Boolean(supabaseAdmin),
     });
@@ -1982,7 +2059,9 @@ app.post("/api/autopilot/start", requireAuth, async (req, res) => {
     const senderCompany = cleanString(req.body?.senderCompany);
 
     if (!niche) {
-      return res.status(400).json({ success: false, error: "Niche is required." });
+      return res
+        .status(400)
+        .json({ success: false, error: "Niche is required." });
     }
 
     if (!emailTransportConfigured()) {
@@ -1997,7 +2076,8 @@ app.post("/api/autopilot/start", requireAuth, async (req, res) => {
     if (!supabaseAdmin) {
       return res.status(503).json({
         success: false,
-        error: "Persistent cloud mode requires SUPABASE_SERVICE_ROLE_KEY on the backend.",
+        error:
+          "Persistent cloud mode requires SUPABASE_SERVICE_ROLE_KEY on the backend.",
       });
     }
 
@@ -2131,10 +2211,15 @@ app.post("/api/autopilot/stop", requireAuth, async (req, res) => {
         })
         .eq("user_id", req.user.id);
 
-      if (error) console.warn("Persist autopilot stop failed:", error.message || error);
+      if (error)
+        console.warn("Persist autopilot stop failed:", error.message || error);
     }
 
-    res.json({ success: true, active: false, persistent: Boolean(supabaseAdmin) });
+    res.json({
+      success: true,
+      active: false,
+      persistent: Boolean(supabaseAdmin),
+    });
   } catch (error) {
     console.error("Autopilot stop:", errorMessage(error));
     res.status(500).json({
@@ -2150,7 +2235,8 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
       return res.status(503).json({
         success: false,
         stage: "configuration",
-        error: "Brevo is partially configured. Backend Render must have both BREVO_API_KEY and BREVO_FROM_EMAIL.",
+        error:
+          "Brevo is partially configured. Backend Render must have both BREVO_API_KEY and BREVO_FROM_EMAIL.",
         brevoApiKeyConfigured: Boolean(BREVO_API_KEY),
         brevoFromEmailConfigured: Boolean(BREVO_FROM_EMAIL),
       });
@@ -2160,7 +2246,8 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
       return res.status(503).json({
         success: false,
         stage: "configuration",
-        error: "No email transport is configured. Use Brevo HTTPS with BREVO_API_KEY and BREVO_FROM_EMAIL.",
+        error:
+          "No email transport is configured. Use Brevo HTTPS with BREVO_API_KEY and BREVO_FROM_EMAIL.",
       });
     }
 
@@ -2191,12 +2278,11 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
     let result;
     try {
       result = await sendEmail({
-      to,
-      subject: "AI Client Hunter — email test",
-      notification: true,
-      text:
-        "Email delivery is working. AI Client Hunter can send outreach using the configured email transport.",
-    });
+        to,
+        subject: "AI Client Hunter — email test",
+        notification: true,
+        text: "Email delivery is working. AI Client Hunter can send outreach using the configured email transport.",
+      });
     } catch (error) {
       error.stage = brevoConfigured() ? "brevo-send" : "smtp-send";
       throw error;
@@ -2213,12 +2299,16 @@ app.post("/api/email/test", requireAuth, async (req, res) => {
     res.status(502).json({
       success: false,
       stage: error?.stage || "unknown",
-      error: `Email test failed at ${error?.stage || "unknown"}: ${errorMessage(error) || "Unknown email error."}`,
+      error: `Email test failed at ${error?.stage || "unknown"}: ${
+        errorMessage(error) || "Unknown email error."
+      }`,
     });
   }
 });
 
-app.use((req, res) => res.status(404).json({ success: false, error: "Route not found." }));
+app.use((req, res) =>
+  res.status(404).json({ success: false, error: "Route not found." })
+);
 app.use((error, req, res, next) => {
   console.error("Unhandled error:", error?.message || error);
   if (res.headersSent) return next(error);
@@ -2233,7 +2323,9 @@ async function restoreAutopilotAfterStartup() {
     return;
   }
 
-  console.log(`Persistent Autopilot: restoring ${jobs.length} active job(s)...`);
+  console.log(
+    `Persistent Autopilot: restoring ${jobs.length} active job(s)...`
+  );
 
   for (const job of jobs) {
     autopilotJobs.set(jobKey(job.userId), job);
@@ -2260,12 +2352,32 @@ app.listen(PORT, "0.0.0.0", async () => {
   console.log(`Server: 0.0.0.0:${PORT}`);
   console.log(`Gemini: ${GEMINI_API_KEY ? "CONNECTED" : "NOT CONFIGURED"}`);
   console.log(`Tavily: ${TAVILY_API_KEY ? "CONNECTED" : "NOT CONFIGURED"}`);
-  console.log(`Supabase: ${supabaseAuthClient ? "CONNECTED" : "NOT CONFIGURED"}`);
-  console.log(`Supabase Admin: ${supabaseAdmin ? "CONNECTED" : "NOT CONFIGURED"}`);
-  console.log(`Email transport: ${brevoConfigured() ? "BREVO HTTPS" : smtpConfigured() ? "SMTP" : "NOT CONFIGURED"}`);
-  console.log(`IMAP: ${IMAP_HOST && IMAP_USER && IMAP_PASS ? "CONNECTED" : "NOT CONFIGURED"}`);
-  console.log(`Persistent Autopilot: ${supabaseAdmin ? "ENABLED" : "DISABLED"}`);
-  console.log(`Persistent Reply Monitor: ${supabaseAdmin ? "ENABLED" : "DISABLED"}`);
+  console.log(
+    `Supabase: ${supabaseAuthClient ? "CONNECTED" : "NOT CONFIGURED"}`
+  );
+  console.log(
+    `Supabase Admin: ${supabaseAdmin ? "CONNECTED" : "NOT CONFIGURED"}`
+  );
+  console.log(
+    `Email transport: ${
+      brevoConfigured()
+        ? "BREVO HTTPS"
+        : smtpConfigured()
+        ? "SMTP"
+        : "NOT CONFIGURED"
+    }`
+  );
+  console.log(
+    `IMAP: ${
+      IMAP_HOST && IMAP_USER && IMAP_PASS ? "CONNECTED" : "NOT CONFIGURED"
+    }`
+  );
+  console.log(
+    `Persistent Autopilot: ${supabaseAdmin ? "ENABLED" : "DISABLED"}`
+  );
+  console.log(
+    `Persistent Reply Monitor: ${supabaseAdmin ? "ENABLED" : "DISABLED"}`
+  );
   console.log(`Autopilot interval: ${AUTOPILOT_INTERVAL_MINUTES} minutes`);
   console.log(`Autopilot minimum score: ${AUTOPILOT_MIN_SCORE}`);
   console.log(`Daily email limit: ${DAILY_EMAIL_LIMIT}`);
@@ -2275,12 +2387,17 @@ app.listen(PORT, "0.0.0.0", async () => {
   if (brevoConfigured()) {
     verifyBrevoTransport()
       .then(() => console.log("Brevo API verification: SUCCESS"))
-      .catch((error) => console.error("Brevo API verification: FAILED —", errorMessage(error)));
+      .catch((error) =>
+        console.error("Brevo API verification: FAILED —", errorMessage(error))
+      );
   } else if (!brevoPartiallyConfigured() && transporter) {
     // SMTP may be blocked on Render Free; this is informational only.
-    transporter.verify()
+    transporter
+      .verify()
       .then(() => console.log("SMTP verification: SUCCESS"))
-      .catch((error) => console.error("SMTP verification: FAILED —", errorMessage(error)));
+      .catch((error) =>
+        console.error("SMTP verification: FAILED —", errorMessage(error))
+      );
   }
 
   if (IMAP_HOST && IMAP_USER && IMAP_PASS && supabaseAdmin) {
